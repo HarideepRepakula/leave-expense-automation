@@ -1,0 +1,36 @@
+# PostgreSQL 16 for local development and tests (amendment F1).
+# Start:  docker compose up -d
+# Stop:   docker compose down          (keeps data)
+# Reset:  docker compose down -v       (deletes the volume; init scripts run again on next start)
+#
+# The container superuser is the project's migrator role. Application roles are created by
+# sql/init/01_roles.sql on FIRST start only. The test database lea_test is created by
+# sql/init/02_test_database.sql, also on first start.
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: lea_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_MIGRATOR_USER:-lea_migrator}
+      POSTGRES_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD:-change-me-migrator}
+      POSTGRES_DB: ${POSTGRES_DEV_DB:-lea_dev}
+      # Passed through to the init scripts via psql variables (see sql/init/*.sql)
+      LEA_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:-change-me-app}
+      LEA_ANALYTICS_PASSWORD: ${POSTGRES_ANALYTICS_PASSWORD:-change-me-analytics}
+      LEA_EVALUATION_PASSWORD: ${POSTGRES_EVALUATION_PASSWORD:-change-me-evaluation}
+      LEA_TEST_DB: ${POSTGRES_TEST_DB:-lea_test}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_MIGRATOR_USER:-lea_migrator} -d ${POSTGRES_DEV_DB:-lea_dev}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:

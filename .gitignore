@@ -1,0 +1,35 @@
+# Secrets and local config
+.env
+*.local.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated data (regenerable from the seed; manifests are committed under data/ when a phase says so)
+data/raw/
+data/processed/
+data/validation/
+# data/ground_truth/ is committed from Phase 4 onward; keep tracked.
+
+# Docker volumes and local DB dumps
+pgdata/
+*.dump
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
