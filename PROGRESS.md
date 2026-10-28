@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 4 (Ground-truth generation and validation framework)
-Status: COMPLETE AND VERIFIED 2026-10-28. Waiting for "APPROVED PHASE 4". Do not start Phase 5 before that.
+Current phase: Phase 5 (Leave balance and leave request services)
+Status: IN PROGRESS (started 2026-10-28 after "APPROVED PHASE 4").
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -11,6 +11,12 @@ Phase 3: APPROVED 2026-10-28. Owner verified fingerprint e8758c8f... and "132 pa
   - the dataset fingerprint WILL change when Phase 5 relaxes the guard (expected, not a defect);
   - Phase 5 must measure the cross-year share of leave requests and check it against ASM-042 (about 3 percent;
     Phase 3 baseline has 1 of 800).
+Phase 4: APPROVED 2026-10-28. Owner re-ran validation, the reproducibility check (53 of 53 identical,
+  fingerprint 67515636...) and pytest (238 passed) independently. Decisions AMB-P4-01..07 accepted as applied.
+  - S19 limitation (all 8 S19 cases are one employee, the G7) is to be revisited in Phase 7.
+  - Phase 4 cleanup item (owner, 2026-10-28): when a dataset (e.g. the starter scale) cannot reach a scenario,
+    the generator prints a clear warning and the manifest records which scenarios were not generated
+    (or were only partly generated). Scheduled as the first task of Phase 5.
 
 ## Phase 4 record
 
