@@ -1,16 +1,24 @@
-"""Leave balance ledger rules (BR-LBAL-01..03).
+"""Leave balance ledger rules (BR-LBAL-01..09).
 
-Phase 3 brings forward the pure accrual schedule so the generator does not re-implement it (DEC-01, RK-01).
-Phase 5 adds carry-forward (BR-LBAL-04), usage postings, snapshot reconciliation and the DB-backed service.
+Phase 3 brought forward the pure accrual schedule (DEC-01, RK-01). Phase 5 adds the negative floor (BR-LBAL-08),
+carry-forward (BR-LBAL-04), the per-year available balance used at submission (BR-LBAL-07/09), usage postings
+(BR-LBAL-05) and snapshot reconciliation (BR-LBAL-06). Everything here is derived from the ledger rows, the
+accrual schedule and the open reservations it is given; nothing here writes.
 """
 from __future__ import annotations
 
 import calendar as _cal
-from datetime import date
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
 
-from src.common.enums import AccrualMethod
+from src.common import ids
+from src.common.enums import AccrualMethod, LeaveTxnType
 from src.common.money import floor_half
+
+ZERO = Decimal("0")
+ONE_DP = Decimal("0.1")
+CARRY_TYPES = frozenset({LeaveTxnType.CARRY_FORWARD.value, LeaveTxnType.CARRY_FORWARD_EXPIRY.value})
 
 
 def monthly_accrual(policy: dict) -> Decimal:
@@ -69,3 +77,132 @@ def accrual_schedule(
         if when <= as_of and qty > 0:
             postings.append((when, qty))
     return postings
+
+
+def negative_floor(policy: dict) -> Decimal:
+    """BR-LBAL-08: the lowest available balance the policy permits (0, or -negative_limit_days)."""
+    return -Decimal(policy["negative_limit_days"]) if policy["negative_balance_allowed"] else ZERO
+
+
+def carry_forward(available_at_year_end: Decimal, policy: dict) -> tuple[Decimal, Decimal]:
+    """BR-LBAL-04: (carried into Jan 1, expired). A positive balance carries up to the cap and the excess expires.
+    A negative balance carries in full as debt when the policy permits negatives, else nothing (ASM-P4-12)."""
+    if available_at_year_end < 0:
+        carried = available_at_year_end if policy["negative_balance_allowed"] else ZERO
+        return carried.quantize(ONE_DP), ZERO
+    carried = min(available_at_year_end, Decimal(policy["carry_forward_cap_days"]))
+    return carried.quantize(ONE_DP), (available_at_year_end - carried).quantize(ONE_DP)
+
+
+def balance_year(leave_balance_id: str) -> int:
+    """LBAL-<employee>-<policy>-<yyyy> (AM-A6): the leave year is the last segment."""
+    return int(leave_balance_id.rsplit("-", 1)[1])
+
+
+@dataclass(frozen=True)
+class Reservation:
+    """The part of an open (PENDING_APPROVAL / ESCALATED_FOR_REVIEW) request that falls in one leave year."""
+    request_id: str
+    year: int
+    quantity: Decimal
+    submitted_at: datetime
+
+
+class BalanceBook:
+    """One employee's balances on one policy (BR-LBAL-01): ledger rows of every year, the accrual schedule and
+    the open reservations.
+
+    Accrual is taken from the BR-LBAL-03 schedule ("recomputed from the ledger rules", BR-LV-13); posted ACCRUAL
+    rows must equal the schedule and `accrual_mismatches` reports any difference as a technical problem.
+    """
+
+    def __init__(self, employee: dict, policy: dict, ledger: list[dict], balance_years,
+                 reservations: list[Reservation] = ()) -> None:
+        self.employee, self.policy = employee, policy
+        self.years = frozenset(balance_years)
+        self.rows: dict[int, list[dict]] = {}
+        for t in ledger:
+            self.rows.setdefault(balance_year(t["leave_balance_id"]), []).append(t)
+        self.reservations = list(reservations)
+        self._schedule: dict[int, list[tuple[date, Decimal]]] = {}
+
+    def schedule(self, year: int) -> list[tuple[date, Decimal]]:
+        if year not in self._schedule:
+            e = self.employee
+            self._schedule[year] = accrual_schedule(self.policy, e["employment_start"], e["employment_end"], year,
+                                                    date(year, 12, 31))
+        return self._schedule[year]
+
+    def accrued(self, year: int, upto: date) -> Decimal:
+        return sum((q for d, q in self.schedule(year) if d <= upto), ZERO)
+
+    def posted(self, year: int, on: date, include_accrual: bool = False) -> Decimal:
+        """Ledger rows of that year dated on or before `on` (ACCRUAL rows only when asked)."""
+        return sum((t["quantity"] for t in self.rows.get(year, []) if t["txn_date"] <= on
+                    and (include_accrual or t["txn_type"] != LeaveTxnType.ACCRUAL.value)), ZERO)
+
+    def reserved(self, year: int, exclude: str | None = None, before: datetime | None = None) -> Decimal:
+        """BR-LBAL-07: open reservations of that year (optionally only those submitted before `before`)."""
+        return sum((r.quantity for r in self.reservations if r.year == year and r.request_id != exclude
+                    and (before is None or r.submitted_at < before)), ZERO)
+
+    def carry_in(self, year: int, on: date, before: datetime | None = None) -> Decimal:
+        """Carry-forward into `year` as known on `on`. Zero before Jan 1 of that year (unknown until Dec 31,
+        BR-LBAL-09) and when the employee had no balance the year before. When the year-end CARRY_FORWARD rows
+        are already posted they are part of `posted`. Otherwise it is recomputed (BR-LV-13): the previous year's
+        balance at Dec 31 minus that year's still-open reservations, then BR-LBAL-04 (ASM-P5-03)."""
+        if on < date(year, 1, 1) or (year - 1) not in self.years:
+            return ZERO
+        if any(t["txn_type"] in CARRY_TYPES for t in self.rows.get(year, [])):
+            return ZERO
+        dec31 = date(year - 1, 12, 31)
+        prev = (self.carry_in(year - 1, dec31, before) + self.posted(year - 1, on)
+                + self.accrued(year - 1, dec31) - self.reserved(year - 1, before=before))
+        return carry_forward(prev, self.policy)[0]
+
+    def available(self, year: int, on: date, part_start: date | None = None, exclude: str | None = None,
+                  before: datetime | None = None) -> Decimal:
+        """BR-LBAL-07/09: available_for_validation for one leave year, checked on `on` (the submission date):
+        carry-forward + posted ledger as of `on` + accrual scheduled on or before max(on, part_start) - open
+        reservations of that year. Compare against negative_floor(policy) (BR-LBAL-08). A year without a
+        leave_balance row has nothing available: there is no balance to post usage to (ASM-P5-06)."""
+        if year not in self.years:
+            return ZERO.quantize(ONE_DP)
+        upto = on if part_start is None else max(on, part_start)
+        return (self.carry_in(year, on, before) + self.posted(year, on) + self.accrued(year, upto)
+                - self.reserved(year, exclude, before)).quantize(ONE_DP)
+
+    def accrual_mismatches(self, on: date) -> list[int]:
+        """Years whose posted ACCRUAL rows (dated <= on) differ from the schedule (BR-LV-13 technical check)."""
+        bad = []
+        for year in sorted(self.years):
+            posted = sorted((t["txn_date"], t["quantity"]) for t in self.rows.get(year, [])
+                            if t["txn_type"] == LeaveTxnType.ACCRUAL.value and t["txn_date"] <= on)
+            if posted != [(d, q) for d, q in self.schedule(year) if d <= on]:
+                bad.append(year)
+        return bad
+
+
+def usage_postings(request: dict, parts: dict[int, Decimal], on: date, reason: str) -> list[dict]:
+    """BR-LBAL-05 + BR-LBAL-09: one USAGE row per leave year of an approved request, dated `on` (the approval
+    date; the submission date for legacy rows, ASM-P4-09). Unnumbered: the caller assigns LBT ids."""
+    return [{"leave_balance_id": ids.leave_balance_id(request["employee_id"], request["leave_policy_id"], year),
+             "leave_request_id": request["leave_request_id"], "txn_type": LeaveTxnType.USAGE.value,
+             "quantity": -qty, "txn_date": on, "reason": reason}
+            for year, qty in sorted(parts.items())]
+
+
+def reconcile_snapshot(snapshot: dict, ledger: list[dict]) -> list[str]:
+    """BR-LBAL-06: snapshot columns recomputed from the ledger rows of that balance; returns the mismatches.
+    A mismatch is reported, never silently corrected."""
+    s: dict[str, Decimal] = {}
+    for t in ledger:
+        s[t["txn_type"]] = s.get(t["txn_type"], ZERO) + t["quantity"]
+    expected = {
+        "opening_balance": s.get("OPENING", ZERO) + s.get("CARRY_FORWARD", ZERO),
+        "accrued": s.get("ACCRUAL", ZERO),
+        "adjustments": s.get("ADJUSTMENT", ZERO) + s.get("CARRY_FORWARD_EXPIRY", ZERO),
+        "used": -(s.get("USAGE", ZERO) + s.get("USAGE_REVERSAL", ZERO)),
+        "available_balance": sum(s.values(), ZERO),
+    }
+    return [f"{k} {snapshot[k]} != ledger {v}" for k, v in expected.items() if snapshot[k] != v]

@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from src.common.clock import SystemClock
 from src.data.dataset import TABLE_ORDER, Dataset, columns, sort_by_pk
 
-GENERATOR_VERSION = "0.4.0"
+GENERATOR_VERSION = "0.5.0"
 EXCLUDED_FROM_CHECKSUM = ("generated_at",)
 
 

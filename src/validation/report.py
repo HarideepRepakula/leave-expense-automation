@@ -23,6 +23,23 @@ def validate_folder(raw_dir: Path, config_dir: Path) -> tuple[list[CheckResult],
     return results, summary_metrics(results)
 
 
+DETECTION_COLUMNS = ["record_type", "record_id", "exception_code", "detected_by", "detail"]
+
+
+def write_detections(detections: list, folder: Path) -> Path:
+    """data/validation/detections.csv (docs/08 section 1): one row per (record, code, detector). The rules live in
+    src/services (DEC-P4-07); this only writes their output, sorted, so it takes part in the M13 check."""
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "detections.csv"
+    rows = sorted(({c: getattr(d, c) for c in DETECTION_COLUMNS} for d in detections),
+                  key=lambda r: tuple(r[c] for c in DETECTION_COLUMNS))
+    with path.open("w", encoding="utf-8", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=DETECTION_COLUMNS, lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+    return path
+
+
 def write_report(results: list[CheckResult], metrics: dict, folder: Path) -> list[Path]:
     folder.mkdir(parents=True, exist_ok=True)
     summary = [{"check_id": r.check_id, "check_name": r.name, "metric": r.metric, "subjects": r.subjects,

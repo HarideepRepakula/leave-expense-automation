@@ -84,6 +84,11 @@ leave:
     SICK: {min: -3, max: 60}
   last_leave_date: 2026-12-31         # ASM-P3-13 no 2027 balances exist, so leave ends by this date
   max_attempts_per_request: 500
+  # ASM-P5-07 (AMB-P5-01): designated year-end requests that span Dec 31 -> Jan 1, so that about 3 percent of all
+  # requests cross a leave-year boundary (ASM-042). Natural spans alone gave 5 of 800 (0.62 percent) in Phase 5.
+  year_end:
+    share: 0.03                       # probability per request, drawn once per request from the leave stream
+    new_year_business_days: 1         # business days after Jan 1; the rest fall in the last December days
 
 expenses:
   line_count_weights: [0.25, 0.22, 0.18, 0.12, 0.07, 0.05, 0.04, 0.03, 0.02, 0.02]   # 1..10 lines, ASM-041

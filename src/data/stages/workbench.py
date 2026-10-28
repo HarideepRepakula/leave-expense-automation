@@ -25,9 +25,10 @@ from src.common.money import fx_rate_on, money
 from src.data.stages import GenParams
 from src.data.stages.balances import number_transactions
 from src.data.stages.expenses import assignment_on, receipt_hash
-from src.data.stages.leave import policy_family
+from src.data.stages.leave import LeaveGuard, policy_family
 from src.services.calendar_service import HolidayCalendar, quantity_by_year, requested_quantity
-from src.services.leave_balance_service import accrual_schedule
+from src.services.leave_balance_service import accrual_schedule, usage_postings
+from src.services.leave_batch import LEGACY_REASON
 from src.services.policy_resolver import resolve_version
 
 ZERO = Decimal("0")
@@ -85,6 +86,8 @@ class Workbench:
             self.ledger[t["leave_balance_id"]].append((t["txn_date"], t["quantity"]))
             if t["txn_type"] == LeaveTxnType.OPENING.value:
                 self.opening[t["leave_balance_id"]] += t["quantity"]
+        self.guard = LeaveGuard(cfg, p, ds["employee"], ds["leave_policy"], calendar, ds["leave_balance_transaction"],
+                                ds["leave_balance"])
         self.taken: set[str] = set()               # records carrying a planted scenario, control or boundary
         self.locked: set[tuple[str, str]] = set()  # (LEAVE|EXPENSE, employee_id) whose records may not be edited
         self.legacy_approved: list[str] = []
@@ -181,37 +184,12 @@ class Workbench:
             and years & set(self.parts(o))
             for o in self.leave_of(r["employee_id"]))
 
-    def leave_guard(self, emp_id: str, exempt: frozenset[str] = frozenset(),
-                    allow_overlap: frozenset[frozenset] = frozenset()) -> bool:
-        """Phase 3 validity guard (DEC-41) for one employee after an edit: employment, last leave date, no
-        overlap (except allowed pairs), unpaid cap, and the conservative posted-ledger balance check. `exempt`
-        requests are deliberately over balance and are left out of the balance check."""
-        e = self.emps[emp_id]
-        reqs = sorted(self.leave_of(emp_id), key=lambda r: (r["created_at"], r["leave_request_id"]))
-        last = self.cfg["generation"]["leave"]["last_leave_date"]
-        for r in reqs:
-            if r["start_date"] < e["employment_start"] or r["end_date"] > last or r["requested_quantity"] < Decimal("0.5") \
-                    or (e["employment_end"] is not None and r["end_date"] > e["employment_end"]):
-                return False
-        for i, a in enumerate(reqs):
-            for b in reqs[i + 1:]:
-                if not (a["end_date"] < b["start_date"] or b["end_date"] < a["start_date"]) and \
-                        frozenset((a["leave_request_id"], b["leave_request_id"])) not in allow_overlap:
-                    return False
-        used: dict[tuple, Decimal] = defaultdict(Decimal)
-        for r in reqs:
-            if r["leave_request_id"] in exempt:
-                continue
-            pol = self.lpols[r["leave_policy_id"]]
-            for y, q in self.parts(r).items():
-                key = (pol["leave_policy_id"], y)
-                used[key] += q
-                if pol["leave_type"] == "UNPAID":
-                    if used[key] > pol["max_days_per_year"]:
-                        return False
-                elif self.posted(emp_id, pol["leave_policy_id"], y, self.sub_date(r)) < used[key]:
-                    return False
-        return True
+    def leave_guard(self, emp_id: str, expect: dict[str, set[str]] | None = None,
+                    legacy: frozenset[str] = frozenset()) -> bool:
+        """Validity guard for one employee after an edit (DEC-01, Phase 5): the leave services, replaying all of
+        the employee's requests in submission order with the batch detectors, must find exactly `expect` on the
+        planted records and nothing on any other. `legacy` ids are about to be forced APPROVED (S01, S02)."""
+        return self.guard.ok(emp_id, self.leave_of(emp_id), expect, legacy)
 
     def approve_legacy(self, r: dict) -> None:
         r["workflow_status"] = WorkflowStatus.APPROVED.value
@@ -398,13 +376,10 @@ class Workbench:
             r = self.leave[leave_map[old]]
             if self.leave_type(r) == "UNPAID":
                 continue          # UNPAID has no balance and no ledger (ASM-047)
-            for y, q in self.parts(r).items():
-                lbal = ids.leave_balance_id(r["employee_id"], r["leave_policy_id"], y)
-                postings.append({"leave_balance_id": lbal, "leave_request_id": r["leave_request_id"],
-                                 "txn_type": LeaveTxnType.USAGE.value, "quantity": -q,
-                                 "txn_date": self.sub_date(r), "reason": "Legacy approval (pre-enforcement)"})
-                snap = snapshots[lbal]
-                snap["used"] = (snap["used"] + q).quantize(Decimal("0.1"))
+            for t in usage_postings(r, self.parts(r), self.sub_date(r), LEGACY_REASON):
+                postings.append(t)
+                snap = snapshots[t["leave_balance_id"]]
+                snap["used"] = (snap["used"] - t["quantity"]).quantize(Decimal("0.1"))
                 snap["available_balance"] = (snap["opening_balance"] + snap["accrued"] + snap["adjustments"]
                                              - snap["used"]).quantize(Decimal("0.1"))
         self.ds["leave_balance_transaction"] = number_transactions(postings)

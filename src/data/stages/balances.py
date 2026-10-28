@@ -97,13 +97,3 @@ def number_transactions(postings: list[dict]) -> list[dict]:
             "correlation_id": uuid.uuid5(CORRELATION_NAMESPACE, txn_id),
         })
     return transactions
-
-
-def ledger_index(transactions: list[dict]) -> dict[str, list[tuple[date, Decimal]]]:
-    """leave_balance_id -> postings sorted by date, for 'available on a date' lookups."""
-    index: dict[str, list[tuple[date, Decimal]]] = {}
-    for t in transactions:
-        index.setdefault(t["leave_balance_id"], []).append((t["txn_date"], t["quantity"]))
-    for v in index.values():
-        v.sort()
-    return index

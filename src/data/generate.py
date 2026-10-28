@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -26,7 +26,7 @@ from src.data.config_loader import load_config
 from src.data.dataset import TABLE_ORDER, Dataset, sort_by_pk
 from src.data.stages import GenParams
 from src.data.stages.anomalies import inject_anomalies
-from src.data.stages.balances import build_balances, ledger_index
+from src.data.stages.balances import build_balances
 from src.data.stages.boundaries import inject_boundaries
 from src.data.stages.expenses import build_expense_claims
 from src.data.stages.ground_truth import GroundTruth, build_ground_truth, write_ground_truth
@@ -34,6 +34,8 @@ from src.data.stages.leave import build_leave_requests
 from src.data.stages.master import build_master
 from src.data.stages.workbench import Workbench
 from src.services.calendar_service import HolidayCalendar
+from src.services.exception_service import ExceptionCatalogue
+from src.services.leave_batch import replay_leave
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "config"
@@ -47,6 +49,7 @@ class Generation:
     meta: dict
     truth: GroundTruth | None
     config_dir: Path
+    detections: list = field(default_factory=list)   # leave service findings (Phase 5), see leave_detections()
 
 
 def build(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
@@ -75,13 +78,13 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
     dataset.update(build_balances(p, streams, dataset["employee"], dataset["leave_policy"], years))  # S2
     dataset["leave_request"] = build_leave_requests(                                             # S3
         cfg, p, streams, dataset["employee"], dataset["leave_policy"], calendar,
-        ledger_index(dataset["leave_balance_transaction"]))
+        dataset["leave_balance_transaction"], dataset["leave_balance"])
     dataset.update(build_expense_claims(                                                         # S4
         cfg, p, streams, dataset["employee"], dataset["employee_cost_center_assignment"],
         dataset["expense_policy"], dataset["fx_rate"]))
     stages = ["S1 master", "S2 balances (opening + accrual)", "S3 leave", "S4 expenses"]
 
-    truth = None
+    truth, detections = None, []
     if not baseline_only:
         wb = Workbench(cfg, p, dataset, calendar)                                                # S5
         inject_anomalies(cfg, p, wb, {"LEAVE": streams.get("anomalies"), "EXPENSE": streams.get("anomalies_expense")})
@@ -91,12 +94,14 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         truth = build_ground_truth(cfg, p, dataset, wb.plants, wb.boundaries, leave_map, claim_map,  # S9
                                    config_dir, FIXTURES_DIR)
         stages += ["S5 anomalies + boundaries (in place)", "S9 ground truth (planted definitions + reference oracle)"]
+        detections = leave_detections(cfg, dataset, calendar)
+        stages.append("leave services replay -> validation/detections.csv (Phase 5)")
 
     missing = [t for t in TABLE_ORDER if t not in dataset]
     if missing:
         raise RuntimeError(f"stages did not produce: {missing}")
     meta = {
-        "phase": 3 if baseline_only else 4,
+        "phase": 3 if baseline_only else 5,
         "stages": stages,
         "seed": p.seed,
         "parameters": {"employees": p.employees, "leave_requests": p.leave_requests,
@@ -106,7 +111,28 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
     }
     if truth is not None:
         meta["ground_truth_counts"] = {name: len(rows) for name, rows in truth.tables.items()}
-    return Generation(dataset, credentials, meta, truth, config_dir)
+        meta["scenarios_not_reached"] = scenario_shortfalls(truth.tables["scenario"])
+    return Generation(dataset, credentials, meta, truth, config_dir, detections)
+
+
+def leave_detections(cfg: dict, dataset: Dataset, calendar: HolidayCalendar) -> list:
+    """System detections for leave (docs/08: request_exception codes plus batch detectors). Until the Phase 7
+    engine runs S6, the codes come from replaying every submitted request through the Phase 5 services in
+    submission order (src/services/leave_batch.py); the dataset itself is not changed (AMB-P3-01)."""
+    replay = replay_leave(dataset["leave_request"], {e["employee_id"]: e for e in dataset["employee"]},
+                          {x["leave_policy_id"]: x for x in dataset["leave_policy"]}, calendar,
+                          dataset["leave_balance_transaction"], dataset["leave_balance"],
+                          ExceptionCatalogue.from_config(cfg["exception_codes"]))
+    return sorted(replay.submission_detections() + replay.detections,
+                  key=lambda d: (d.record_type, d.record_id, d.exception_code, d.detected_by))
+
+
+def scenario_shortfalls(scenarios: list[dict]) -> list[dict]:
+    """Scenarios this dataset could not place in full (Phase 4 cleanup, owner 2026-10-28): actual < planned.
+    Scenarios built by later phases (actual_count NULL) are not shortfalls. Recorded in the manifest."""
+    return [{"scenario_id": s["scenario_id"], "planned": s["planned_count"], "actual": s["actual_count"],
+             "status": "NOT_GENERATED" if s["actual_count"] == 0 else "PARTIAL"}
+            for s in scenarios if s["actual_count"] is not None and s["actual_count"] < s["planned_count"]]
 
 
 def generate(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
@@ -119,7 +145,7 @@ def generate(seed: int | None = None, employees: int | None = None, leave_reques
 def write_outputs(gen: Generation, out: Path) -> tuple[dict, list]:
     """Export ops tables, ground truth and the validation report; one manifest checksums all of them."""
     from src.data.export import write_dataset
-    from src.validation.report import validate_folder, write_report
+    from src.validation.report import validate_folder, write_detections, write_report
 
     results: list = []
 
@@ -127,7 +153,10 @@ def write_outputs(gen: Generation, out: Path) -> tuple[dict, list]:
         files = write_ground_truth(gen.truth, out_dir / "ground_truth") if gen.truth is not None else []
         checks, metrics = validate_folder(out_dir / "raw", gen.config_dir)
         results.extend(checks)
-        return files + write_report(checks, metrics, out_dir / "validation")
+        files += write_report(checks, metrics, out_dir / "validation")
+        if gen.truth is not None:
+            files.append(write_detections(gen.detections, out_dir / "validation"))
+        return files
 
     return write_dataset(gen.dataset, gen.credentials, out, gen.meta, extra_files=extra), results
 
@@ -208,6 +237,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     print(f"seed={gen.meta['seed']} parameters={gen.meta['parameters']} as_of={gen.meta['as_of_date']}")
     _print_summary(gen, manifest, args.out if manifest else None, results, load_counts, db_name)
+    for s in gen.meta.get("scenarios_not_reached", []):
+        print(f"WARNING: scenario {s['scenario_id']} {s['status'].replace('_', ' ').lower()}: "
+              f"{s['actual']} of {s['planned']} planned records (too few candidates at this scale; "
+              f"recorded in manifest.json under scenarios_not_reached)", file=sys.stderr)
     return 1 if any(r.status == "FAIL" for r in results) else 0
 
 

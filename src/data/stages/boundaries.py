@@ -242,7 +242,7 @@ class Boundaries(Planter):
             def edit(r=r, days=days, half=half, avail=avail):
                 wb.set_leave_length(r, r["start_date"], days, end_half=half)
                 return r["requested_quantity"] == avail and r["end_date"].year == 2025 \
-                    and wb.leave_guard(emp, exempt=frozenset({rid}))
+                    and wb.leave_guard(emp)    # the services must accept exactly the whole balance (BC-04)
 
             if self.attempt([rid], [], edit):
                 wb.take(LEAVE, rid, emp)

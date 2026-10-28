@@ -1,6 +1,6 @@
 # 11. Synthetic data generation guide
 
-Phase 3 deliverable, extended in Phase 4. How to run the generator, what it produces, and how to check that it is
+Phase 3 deliverable, extended in Phases 4 and 5. How to run the generator, what it produces, and how to check that it is
 reproducible. Design background: docs/07. Every policy value is an illustrative synthetic ASSUMPTION (docs/09).
 
 ## 1. What the generator produces
@@ -9,11 +9,12 @@ reproducible. Design background: docs/07. Every policy value is an illustrative 
 |---|---|---|
 | S1 master | done (Phase 3; exception_code added in Phase 4) | department, cost_center, cost_center_budget, employee, employee_cost_center_assignment, country_holiday, fx_rate, delegation, leave_policy, expense_policy, approval_rule, exception_code, role, application_user, user_role |
 | S2 balances | partly: OPENING + ACCRUAL (+ USAGE of legacy approvals, Phase 4) | leave_balance (2025, 2026), leave_balance_transaction. CARRY_FORWARD and engine USAGE arrive with Phase 7 |
-| S3 leave | done (raw inputs) | leave_request: SUBMITTED, about 1% DRAFT, 24 legacy APPROVED (S01, S02) |
+| S3 leave | done (raw inputs; since Phase 5 validated by the leave services, per-year rule BR-LBAL-09, about 3% cross-year) | leave_request: SUBMITTED, about 1% DRAFT, 24 legacy APPROVED (S01, S02) |
 | S4 expenses | done (raw inputs) | expense_claim (SUBMITTED, about 1% DRAFT), expense_line (PENDING), receipt |
 | S5 anomalies + boundaries | done (Phase 4) | the same rows, modified in place (docs/07 section 12) |
 | S9 ground truth | done (Phase 4) | data/ground_truth/*, ground_truth schema with --load |
 | validation | done (Phase 4) | data/validation/* (src/validation) |
+| leave detections | done (Phase 5) | data/validation/detections.csv: every submitted leave request replayed through the Phase 5 services in submission order, plus the leave batch detectors (the dataset rows are not changed) |
 | S6 outcomes | Phase 7 | approval steps, events, exceptions, budget ledger |
 | S7 reimbursements, S8 audit | Phase 8 | |
 
@@ -66,9 +67,17 @@ If PowerShell blocks the script, run it once with `powershell -ExecutionPolicy B
 | data/ground_truth/boundary_cases.csv | BC-01..BC-10 records (GTB-0001..) with the expected outcome | yes |
 | data/ground_truth/scenarios.json, ground_truth.json | planned and actual count per scenario; everything combined | yes |
 | data/validation/validation_report.{csv,json,md}, validation_findings.csv | src/validation results, M1-M3 | no (regenerable) |
-| data/manifest.json | seed, parameters, as-of date, generator version, row counts, ground-truth counts, SHA-256 per file (raw, processed, ground_truth, validation), generated_at | yes |
+| data/validation/detections.csv | Phase 5: leave detections (record_type, record_id, exception_code, detected_by SUBMISSION or BATCH_DETECTOR, detail) | no (regenerable; checksummed) |
+| data/manifest.json | seed, parameters, as-of date, generator version, row counts, ground-truth counts, scenarios_not_reached, SHA-256 per file (raw, processed, ground_truth, validation), generated_at | yes |
+
+Scenarios the chosen scale cannot place in full are printed as `WARNING: scenario <id> partial: <actual> of <planned>
+planned records ...` on stderr and listed in manifest.json under `scenarios_not_reached` (empty at full scale).
 
 Run validation on its own: `python -m src.validation` (or `--data data\starter`). Exit code 0 = no check failed.
+Compare the Phase 5 leave services with the independent oracle (every leave request; writes
+data/validation/leave_service_vs_oracle.csv, not part of the manifest):
+`python -m src.evaluation.leave_service_vs_oracle` (or `--raw data\starter\raw --out data\starter\validation`).
+Exit code 0 = no disagreement; records whose only difference is a Phase 7 routing code are listed as ROUTING_PHASE7.
 Rebuild the negative fixtures (tests only, never in data/): `python scripts\build_negative_fixtures.py`.
 
 ## 4. Reproducibility rules

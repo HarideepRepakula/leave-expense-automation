@@ -194,28 +194,28 @@ def test_leave_requests_are_valid_baseline(run, calendar):
             assert a["end_date"] < b["start_date"], "no overlapping requests in the baseline"
 
 
-def test_leave_balance_never_exceeded(run):
-    """Conservative guard: all requests of a balance, in submission order, fit the ledger at that time."""
+def test_leave_baseline_is_valid_for_the_independent_oracle(run):
+    """Since Phase 5 the S3 guard is the leave services with the per-year rule BR-LBAL-09 (AMB-P3-02). Checked
+    independently of the services: the reference oracle finds no exception code on any baseline request, so
+    every submitted baseline request is expected APPROVED; cross-year requests exist and split by year."""
+    from pathlib import Path
+
+    from src.reference.oracle import Oracle
+
     _, _, ds = run
-    ledger = defaultdict(list)
-    for t in ds["leave_balance_transaction"]:
-        ledger[t["leave_balance_id"]].append((t["txn_date"], t["quantity"]))
-    pols = {p["leave_policy_id"]: p for p in ds["leave_policy"]}
-    claims = defaultdict(list)
-    unpaid = defaultdict(Decimal)
+    oracle = Oracle(ds, Path(__file__).resolve().parents[2] / "config")
+    expected = oracle.leave()
     for r in ds["leave_request"]:
-        if pols[r["leave_policy_id"]]["leave_type"] == "UNPAID":
-            unpaid[(r["employee_id"], r["start_date"].year)] += r["requested_quantity"]
-            continue
-        assert r["start_date"].year == r["end_date"].year, "only UNPAID may span leave years in Phase 3"
-        lbal = f"LBAL-{r['employee_id']}-{r['leave_policy_id']}-{r['start_date'].year}"
-        claims[lbal].append((r["created_at"], r["requested_quantity"]))
-    for lbal, items in claims.items():
-        used = Decimal("0")
-        for ts, q in sorted(items):
-            used += q
-            assert sum(q2 for d, q2 in ledger[lbal] if d <= ts.date()) >= used, lbal
-    assert all(v <= Decimal("30.0") for v in unpaid.values())
+        x = expected[r["leave_request_id"]]
+        assert x.codes == [], (r["leave_request_id"], x.codes)
+        assert x.final_status == ("DRAFT" if r["workflow_status"] == "DRAFT" else "APPROVED")
+        assert WINDOW_START <= r["start_date"] and r["end_date"] <= date(2026, 12, 31)   # ASM-P5-06, ASM-P3-13
+    country = {e["employee_id"]: e["country"] for e in ds["employee"]}
+    cross = [r for r in ds["leave_request"] if r["start_date"].year != r["end_date"].year]
+    assert cross, "the per-year rule must let cross-year requests through (ASM-042, ASM-P5-07)"
+    for r in cross:
+        parts = oracle.parts_by_year(r, country[r["employee_id"]])
+        assert sum(q for _, q in parts.values()) == r["requested_quantity"]
 
 
 def test_expense_claims_are_valid_baseline(run):

@@ -65,6 +65,13 @@ def requested_quantity(business_days: int, start_half_day: bool, end_half_day: b
     return (Decimal(business_days) - HALF * int(start_half_day) - HALF * int(end_half_day)).quantize(Decimal("0.1"))
 
 
+def half_days_on_non_business_days(calendar: HolidayCalendar, start: date, end: date, country: str,
+                                   start_half_day: bool, end_half_day: bool) -> list[date]:
+    """BR-CAL-04 / ASM-008: dates carrying a half-day flag that are weekends or holidays (a correctable error)."""
+    flagged = sorted({d for d, flag in ((start, start_half_day), (end, end_half_day)) if flag})
+    return [d for d in flagged if not calendar.is_business_day(d, country)]
+
+
 def quantity_by_year(
     calendar: HolidayCalendar, start: date, end: date, country: str, start_half_day: bool, end_half_day: bool
 ) -> dict[int, Decimal]:

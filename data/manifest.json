@@ -1,13 +1,13 @@
 {
   "as_of_date": "2026-10-22",
   "files": {
-    "ground_truth/anomaly_labels.csv": "4526d606eab92fbd27c991be4f0acf6e97c8be181c376290fd5a5a0ee9ffc90a",
-    "ground_truth/boundary_cases.csv": "e5f65e917a5feb2e54106c1f0d92a2340c9fcbb00aed4ab361cb3e0b49db3f20",
-    "ground_truth/ground_truth.json": "f84ca2803c7d28d693d696dd0ee6ffe6e64c8430d1e682c59b131ac765a2c162",
-    "ground_truth/record_expectations.csv": "2b86c845a1723a3aa2bf3aca7bfe87fc78000beacc1004a5118be40f9de56cd7",
-    "ground_truth/scenarios.json": "0cf064785fd48788dc29188aaf789978ebd770d4f11d579b449d54f8dda20ab2",
+    "ground_truth/anomaly_labels.csv": "0f229c6430aa2a0e1fe7d00096d87c846febec68fdadb6f2e96e46510d80f01a",
+    "ground_truth/boundary_cases.csv": "126c427cf5bc941a70d182cfbba2b5bf03bb30d6edd1149fd9dc99eb27f8f785",
+    "ground_truth/ground_truth.json": "137414bda75c074fbce876da9d5b597234e58aef919392a2c8f728b2e5dd8bec",
+    "ground_truth/record_expectations.csv": "f5f56aa84992a4d19905fd98f314fbe80cc48652d928fccaf6f8ae52f5e1bcf2",
+    "ground_truth/scenarios.json": "970630789142f364f08909101c5f9bb28797faf7729d01c940b95a7c7aeaa21d",
     "processed/dev_credentials.csv": "eceee01316a5396e0f9058fa23acdfae1950fa9cf0c7fe0057805285d8aba512",
-    "processed/seed.sql": "4fee3c3ded731580899e36c4ad8bf16748aa1563da34a9429ebf8efcb299a020",
+    "processed/seed.sql": "f5de511a0a2c9207c173190bb12bec2bffe9006e8d15ef3094c96f2f28f20045",
     "raw/application_user.csv": "2efbacd978972cde65aba0475964223e07185e0ebebc23ac33ae6e759e91d49a",
     "raw/application_user.json": "8355f36cb5346ec8deac0980ced0ecb50e869ce19071cd190990f9c1f7dcabcf",
     "raw/approval_rule.csv": "18b57b6e204d1073edb332754d88cb2178a8b369bac2a9f583a78fac9deac363",
@@ -36,29 +36,30 @@
     "raw/expense_policy.json": "232189eb5a18545d0d7112c1a6e95d2afd380f7cffea9ed8e06418cd1011e476",
     "raw/fx_rate.csv": "b0ba0ad46b323ae0eaa05194e48b2e94735f03254bbc95c9aa7446e5febb7d8d",
     "raw/fx_rate.json": "bc0878bd7eaa463ffdfed866a3a9780c39f8bdaffbd66144aecee8c48f4d798f",
-    "raw/leave_balance.csv": "d6621e116d4acae53131b2ebeda9403e938c4890f44738558fba45595b1f31c4",
-    "raw/leave_balance.json": "ce23d49a4598f065c8c7f682aec356ee3dec7e499aa9f50cb1ae853731573cf0",
-    "raw/leave_balance_transaction.csv": "3b281d33ed41e021859d5d1f095e0413e245bfc2a3d67f8222b3cbeaa3c05364",
-    "raw/leave_balance_transaction.json": "268c290050ef8b0cb4ba8b2cab8b28ffbc57b0fb456fc30cd465b9304bf46500",
+    "raw/leave_balance.csv": "406793a6769b18616e8ce4463a36bb4bebedbf71c851ba82e9e9585d28db62d1",
+    "raw/leave_balance.json": "03d4d0a3c53697c865e3bb3a639cb7d3458fb5541ae369bc534922570ef673e6",
+    "raw/leave_balance_transaction.csv": "47268d60b1023018979d3c24f174bea89460ae9f73eb9ade172296ec701393b0",
+    "raw/leave_balance_transaction.json": "0a228ac8162288edc3af7635f9ebb190be055fa5e0b24515237459be94a273f5",
     "raw/leave_policy.csv": "bca2a214961a78f0be02a0882bdc738cd0a68cd05ddb6d1fc5fb4298bac7fcc3",
     "raw/leave_policy.json": "10fd36a31568b5936394a2f4c08298ece4875d47f06823f3815561dbeec86b13",
-    "raw/leave_request.csv": "e0b43cec875b96f9890687738d69466f079685ffbb8d8374fa090428321bf6ff",
-    "raw/leave_request.json": "2655dbc5ac54ed901f3e0b477d644e0ee3f5a41cd68f339bd384c78801c0ef75",
+    "raw/leave_request.csv": "975675f7cf655fc2eea9430efdac8962083bf0e5badcfe738257dcbd8a42c992",
+    "raw/leave_request.json": "670635169848de4826584dcc9034ad8dff1b14ad35f2cef729600c76f0b0a2f0",
     "raw/receipt.csv": "b4b5958001257c7e1f5091a51ae5680729d1e3ddbdbb4ee744d019db6655998a",
     "raw/receipt.json": "c74086b58dc24c16cfc844433b1b4e458aad2257f19f098fa25f337711be49f3",
     "raw/role.csv": "30aa0b31a702463bf204b7d8e41af4246b15bdf02465bf4e01659119b9d7c0a8",
     "raw/role.json": "20b8ec839ceb3eb7c650f422403833432f676e55fa9e2960516b83aef35e34e5",
     "raw/user_role.csv": "2124db610902920560c9fbcd1292d2397c1c91122990869114952f0d7dbf5d38",
     "raw/user_role.json": "10862bdafb11bb228b999558baacd62d916f74b99e856a831b231a6d242cd20a",
+    "validation/detections.csv": "a2d4c07fc17e6d7eb39ddf171fc055e5ccdf593b9f530a69431ded10182a814a",
     "validation/validation_findings.csv": "375e178b72370072befbf0cb9d5883538901503011b767a5b53bc8756df6b77d",
-    "validation/validation_report.csv": "1b4adb5c9862a52293cd2828507e445f5cc0e62ab799787ec89aea35aa9c625e",
-    "validation/validation_report.json": "7bf9f0d1cfd478c0f3ce21fbc939ca10e3e1bbeb50779a621dbece6b93875342",
-    "validation/validation_report.md": "1d692f46dd2b0e3d9b66114d6b6d50bda18bc3344a2084d60545be20b592ec7c"
+    "validation/validation_report.csv": "53fb371558b97032ef8a28a04bb150ffaa6e145f475b09029be03e15fe97fdfa",
+    "validation/validation_report.json": "10622e2c224283b303caca2121fcb82c4c0f6a1cf80f606130af71a84fc961e1",
+    "validation/validation_report.md": "36b71713f2659cf8981a7464bcdefbab30411579361595e7a04ac65a2fef4d84"
   },
-  "generated_at": "2026-10-28T12:29:12Z",
-  "generator_version": "0.4.0",
+  "generated_at": "2026-10-28T13:24:05Z",
+  "generator_version": "0.5.0",
   "ground_truth_counts": {
-    "anomaly_label": 1022,
+    "anomaly_label": 1057,
     "boundary_case": 40,
     "record_expectation": 1800,
     "scenario": 41
@@ -68,7 +69,7 @@
     "expense_claims": 1000,
     "leave_requests": 800
   },
-  "phase": 4,
+  "phase": 5,
   "row_counts": {
     "application_user": 401,
     "approval_rule": 8,
@@ -85,13 +86,14 @@
     "expense_policy": 21,
     "fx_rate": 4,
     "leave_balance": 1909,
-    "leave_balance_transaction": 13083,
+    "leave_balance_transaction": 13086,
     "leave_policy": 6,
     "leave_request": 800,
     "receipt": 2927,
     "role": 5,
     "user_role": 596
   },
+  "scenarios_not_reached": [],
   "seed": 20261022,
   "stages": [
     "S1 master",
@@ -99,7 +101,8 @@
     "S3 leave",
     "S4 expenses",
     "S5 anomalies + boundaries (in place)",
-    "S9 ground truth (planted definitions + reference oracle)"
+    "S9 ground truth (planted definitions + reference oracle)",
+    "leave services replay -> validation/detections.csv (Phase 5)"
   ],
   "window_start": "2025-01-01"
 }

@@ -191,7 +191,10 @@ class Anomalies(Planter):
 
             def edit():
                 wb.set_leave_length(r, r["start_date"], days)
-                return r["end_date"].year == 2025 and wb.leave_guard(emp, exempt=frozenset({rid}))
+                # The services must find exactly the planted code (none for the S01b control); S01 is checked
+                # as the legacy approval it is about to become.
+                return r["end_date"].year == 2025 and wb.leave_guard(
+                    emp, expect={rid: set(codes)}, legacy=frozenset({rid}) if scenario == "S01" else frozenset())
 
             if self.attempt([rid], [], edit):
                 if scenario == "S01":
@@ -242,8 +245,10 @@ class Anomalies(Planter):
                      lambda d, a: f"quantity raised to {d} days against {a} available (negative not allowed)",
                      {"INSUFFICIENT_BALANCE"})
 
-    def _overlap_into(self, anchor: dict, moved: dict, same_year: bool) -> bool:
-        """Re-assign `moved` to the anchor's employee and re-date it to start inside the anchor's dates."""
+    def _overlap_into(self, anchor: dict, moved: dict, same_year: bool, legacy: bool) -> bool:
+        """Re-assign `moved` to the anchor's employee and re-date it to start inside the anchor's dates.
+        legacy=True (S02): both become legacy approvals, so the batch detector must flag both; legacy=False (S22):
+        the moved request must get OVERLAPPING_PENDING_LEAVE at submission and nothing else may change."""
         wb = self.wb
         emp = anchor["employee_id"]
         start = wb.cal.next_business_day(max(anchor["start_date"], wb.sub_date(moved) + timedelta(days=1)),
@@ -251,13 +256,17 @@ class Anomalies(Planter):
         if start > anchor["end_date"] or not self.target_free(LEAVE, emp):
             return False
         n = int(moved["business_day_count"])
-        pair = frozenset({frozenset((anchor["leave_request_id"], moved["leave_request_id"]))})
+        pair = (anchor["leave_request_id"], moved["leave_request_id"])
+        if legacy:
+            expect, approved = {i: {"OVERLAPPING_APPROVED_LEAVE"} for i in pair}, frozenset(pair)
+        else:
+            expect, approved = {pair[1]: {"OVERLAPPING_PENDING_LEAVE"}}, frozenset()
 
         def edit():
             wb.reassign_leave(moved, emp)
             wb.set_leave_length(moved, start, n)
             return (not same_year or moved["end_date"].year == wb.sub_date(moved).year) \
-                and wb.leave_guard(emp, allow_overlap=pair)
+                and wb.leave_guard(emp, expect=expect, legacy=approved)
 
         return self.attempt([moved["leave_request_id"]], [], edit)
 
@@ -275,7 +284,7 @@ class Anomalies(Planter):
                                       and wb.same_country(a["employee_id"], b["employee_id"])
                                       and wb.sub_date(b) < a["end_date"] and b["created_at"] > a["created_at"]):
                 old_emp = b["employee_id"]
-                if self._overlap_into(a, b, same_year=True):
+                if self._overlap_into(a, b, same_year=True, legacy=True):
                     group = f"S02-{done + 1:02d}"
                     for r in (a, b):
                         wb.approve_legacy(r)
@@ -308,7 +317,7 @@ class Anomalies(Planter):
             if not (wb.free(LEAVE, first) and wb.free(LEAVE, r)):
                 continue
             old_emp = r["employee_id"]
-            if self._overlap_into(first, r, same_year=False):
+            if self._overlap_into(first, r, same_year=False, legacy=False):
                 wb.take(LEAVE, pid, first["employee_id"])
                 wb.take(LEAVE, rid, old_emp)
                 self.plant("S22", LEAVE, rid, {"OVERLAPPING_PENDING_LEAVE"},

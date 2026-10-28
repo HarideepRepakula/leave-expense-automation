@@ -17,6 +17,13 @@
 | tests/test_ground_truth_isolation.py, tests/test_reference_independence.py (Phase 4) | no | no operational module imports or names ground truth; the oracle shares no code with services/data; only the S9 stage uses the oracle |
 | tests/fixtures/negative/ (Phase 4) | no | 8 lifecycle (S16), 8 arithmetic (S17), 3 structural, 2 rule-conflict (S20) fixtures; built by scripts/build_negative_fixtures.py |
 
+| tests/unit/test_business_days.py, test_leave_balance.py, test_leave_validation.py (Phase 5) | no | BR-CAL matrix (weekends and holidays per country, inclusive ends, no substitution, half days, year split); balance rules (floor, carry-forward incl. negative and cap, per-year available incl. scheduled accrual and part start, reservations, year without balance, accrual mismatch, usage postings, snapshot reconciliation); every leave code, severity precedence, overlaps with the half-day boundary, cross-year per-year check, UNPAID cap, input errors, transition table (all 81 pairs), catalogue classification, detectors and replay. World in tests/unit/leave_world.py |
+| tests/data/test_leave_services_on_dataset.py (Phase 5) | no | full and starter scale: services agree with the oracle on every leave request (only ROUTING_PHASE7 differences, exactly the S19-L records); leave detections = planted leave labels; replay posts exactly the legacy USAGE; cross-year share 2.5-3.5 percent; scenarios_not_reached warning and manifest entry |
+| tests/db/test_leave_submission_db.py (Phase 5) | yes | PostgreSQL store: request update, three status events, exception rows, RSE/REX ids from id_sequence, row locks on leave_request and leave_balance |
+
+tests/data/test_generator_baseline.py (Phase 5 change): the Phase 3 test of the conservative balance guard is replaced
+by an independent check: the reference oracle finds no exception code on any baseline request.
+
 tests/db/test_generator_load.py (Phase 4): lea_test has the test-only EXCLUDE constraint (amendment A3), so loading
 the dataset with the planted S02 overlaps must FAIL there (tested); the count test lifts that one constraint for its
 own load and restores it afterwards. It also loads the ground_truth schema.

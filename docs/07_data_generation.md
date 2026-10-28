@@ -292,3 +292,17 @@ src/validation runs on the exported files and, when the database is loaded, on t
 S19 construction (fixed here, AMB-P4-01): the requester is the G7 (no L1). Attempt-type scenarios S11, S12, S13, S18 and
 the technical failures S25 need approval steps, reimbursements and idempotency rows; they are listed in scenarios.json
 with actual_count NULL and are built with Phases 7-8.
+
+## 13. As implemented in Phase 5 (assumptions in docs/09 section 9)
+
+| Piece | Module | Notes |
+|---|---|---|
+| Leave services | src/services/{calendar_service,leave_balance_service,leave_request_service,exception_service,lifecycle}.py | BR-CAL, BR-LBAL-03..09, BR-LV-01..13, severity precedence, transition table; pure functions over a LeaveStore |
+| Stores | in-memory (leave_request_service.InMemoryLeaveStore), PostgreSQL (src/repositories/leave_repository.py) | DB store locks the request and balance rows FOR UPDATE; writes request_status_event and request_exception (DEC-P5-01) |
+| Leave detectors | src/services/leave_detectors.py | OVERLAPPING_APPROVED_LEAVE and NEGATIVE_BALANCE_UNPERMITTED over operational data (DEC-P5-04) |
+| Replay | src/services/leave_batch.py | submission-order replay (ASM-P5-04); used by the S3 and S5 guards (DEC-01), detections.csv and the comparison |
+| S3 / S5 guards | src/data/stages/leave.py (LeaveGuard), workbench.leave_guard | the services must find exactly the planted codes; the Phase 3 conservative guard is gone (DEC-P5-02) |
+| Year-end requests | src/data/stages/leave.py (_draw_year_end), config leave.year_end | about 3 percent cross-year (ASM-P5-07, AMB-P5-01) |
+| Services vs oracle | src/evaluation/leave_service_vs_oracle.py | every leave request compared; routing codes reported as ROUTING_PHASE7 (DEC-P5-05) |
+
+Stage S6 (outcomes written into the dataset), routing, approvals, USAGE at approval and year-end CARRY_FORWARD rows remain Phase 7.
