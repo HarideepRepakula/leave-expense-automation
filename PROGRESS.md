@@ -1,10 +1,16 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 3 (Synthetic master data and transaction generator)
-Status: COMPLETE AND VERIFIED 2026-10-28. Waiting for "APPROVED PHASE 3". Do not start Phase 4 before that.
+Current phase: Phase 4 (Ground-truth generation and validation framework)
+Status: IN PROGRESS (started 2026-10-28).
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
+Phase 3: APPROVED 2026-10-28. Owner verified fingerprint e8758c8f... and "132 passed" independently.
+  Owner decision on the cross-year rule (AMB-P3-02): the generator keeps the stricter posted-ledger guard;
+  Phase 5 implements the per-year rule (docs/05 BR-LBAL-09). Consequences recorded for Phase 5:
+  - the dataset fingerprint WILL change when Phase 5 relaxes the guard (expected, not a defect);
+  - Phase 5 must measure the cross-year share of leave requests and check it against ASM-042 (about 3 percent;
+    Phase 3 baseline has 1 of 800).
 
 ## Phase 3 record
 
