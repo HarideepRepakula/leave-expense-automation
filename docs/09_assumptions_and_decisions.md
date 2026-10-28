@@ -288,7 +288,7 @@ Original proposals:
 | AMB-P4-06 | S08 / BC-05 end date need a line after / on the employment end, which only exists when the claim is submitted after termination. | Accepted as a former-employee claim (ASM-P4-10). |
 | AMB-P4-07 | docs/05 9.5 defines process-owner decisions only for single codes; mixed SOFT codes and codes without a decision need a rule. | ASM-P4-15 precedence (reject > return > approve-only; otherwise stays escalated). |
 
-## 9. Phase 5 additions (leave balance and leave request services), awaiting "APPROVED PHASE 5"
+## 9. Phase 5 additions (leave balance and leave request services), APPROVED 2026-10-28 (AMB-P5-01..04 accepted)
 
 ### 9.1 Assumptions (ASSUMPTION, illustrative synthetic; values in config/*.yaml)
 

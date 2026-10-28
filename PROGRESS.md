@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 5 (Leave balance and leave request services)
-Status: COMPLETE AND VERIFIED 2026-10-28. Waiting for "APPROVED PHASE 5". Do not start Phase 6 before that.
+Current phase: Phase 6 (Expense validation and expense claim services)
+Status: IN PROGRESS (started 2026-10-28 after "APPROVED PHASE 5").
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -17,6 +17,8 @@ Phase 4: APPROVED 2026-10-28. Owner re-ran validation, the reproducibility check
   - Phase 4 cleanup item (owner, 2026-10-28): when a dataset (e.g. the starter scale) cannot reach a scenario,
     the generator prints a clear warning and the manifest records which scenarios were not generated
     (or were only partly generated). Scheduled as the first task of Phase 5.
+
+Phase 5: APPROVED 2026-10-28. AMB-P5-01..04 accepted as applied. The OneDrive copy is already deleted (item closed).
 
 ## Phase 5 record
 
