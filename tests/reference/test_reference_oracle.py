@@ -184,3 +184,27 @@ def test_config_is_read_directly():
     cfg = ReferenceConfig(CONFIG)
     assert cfg.split_threshold == Decimal("200.00") and cfg.split_window == 7 and cfg.max_line_age == 90
     assert cfg.severity["MISSING_RECEIPT"] == "CORRECTABLE"
+
+
+def test_escalated_claim_keeps_its_budget_reservation_until_the_decision(tables):
+    """Owner decision on AMB-P6-01 (Phase 7A): only a validation REJECT/RETURN releases the reservation. C2 shares a
+    receipt with C1 (DUPLICATE_RECEIPT_CROSS_EMPLOYEE, SOFT): escalated, and the process owner will reject it, yet it
+    still holds 1,000 when C3 arrives, so C3 exceeds a budget of C1 + C2 + C3 - 0.01 (it would fit without C2)."""
+    cc = next(c for c in tables["cost_center"] if c["country"] == "IN" and c["is_active"])
+    budget = next(b for b in tables["cost_center_budget"]
+                  if b["cost_center_id"] == cc["cost_center_id"] and b["budget_period_start"].year == 2026)
+    t = dict(tables, cost_center_budget=[dict(budget, budget_amount=Decimal("2999.99"))],
+             receipt=[{"receipt_id": f"RCP-{i}", "receipt_hash": h} for i, h in ((1, "H1"), (2, "H1"), (3, "H3"))])
+    t["expense_claim"], t["expense_line"] = [], []
+    for i, who in ((1, "EMP-000005"), (2, "EMP-000008"), (3, "EMP-000009")):
+        cid = f"EXP-2026-00090{i}"
+        t["expense_claim"].append({"expense_claim_id": cid, "employee_id": who, "workflow_status": "SUBMITTED",
+                                   "created_at": datetime(2026, 3, i + 1, 9, tzinfo=timezone.utc), "currency": "INR",
+                                   "expense_policy_id": None, "cost_center_id": cc["cost_center_id"]})
+        t["expense_line"].append({"expense_line_id": f"EXPL-{cid}-01", "expense_claim_id": cid, "line_number": 1,
+                                  "category": "MEALS", "expense_date": date(2026, 3, 1), "currency": "INR",
+                                  "line_amount": Decimal("1000.00"), "receipt_id": f"RCP-{i}"})
+    x = Oracle(t, CONFIG).expenses()
+    assert x["EXP-2026-000902"].submission_codes == {"DUPLICATE_RECEIPT_CROSS_EMPLOYEE"}
+    assert x["EXP-2026-000902"].final_status == "REJECTED"
+    assert x["EXP-2026-000903"].submission_codes == {"BUDGET_EXCEEDED"}

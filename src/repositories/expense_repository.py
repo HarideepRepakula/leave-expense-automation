@@ -7,6 +7,8 @@ PASS / CAPPED / FAIL), three request_status_event rows, one request_exception ro
 RELEASE when rejected or returned) in cost_center_transaction with the budget's committed_amount kept equal to
 its ledger (V-ARITH-08). Other claims count for duplicate, pattern and split checks with the USD total the
 services stored on them (claims never validated by the services have none and are left out of split checks).
+Routing (Phase 7A) reads approval_rule, employee, department and delegation in the same transaction; approval_step
+rows and the ASSIGNED approval_event (APE) are written for PENDING_APPROVAL.
 """
 from __future__ import annotations
 
@@ -15,7 +17,9 @@ from datetime import date
 import sqlalchemy as sa
 
 from src.common.enums import BudgetTxnType, RequestType, WorkflowStatus
-from src.repositories.base import allocate_ids, table, write_events_and_exceptions
+from src.repositories.base import allocate_ids, load_router, next_step_sequence, table, write_events_and_exceptions, \
+    write_steps
+from src.services.approval_routing import ApprovalRouter
 from src.services.expense_service import DetectionParams, ExpenseContext, ExpenseSubmissionResult, apply_to_claim, \
     claim_hashes, current_lines, top_line
 
@@ -32,6 +36,12 @@ class SqlExpenseStore:
         t = table("expense_claim")
         return dict(self.conn.execute(sa.select(t).where(t.c.expense_claim_id == claim_id).with_for_update())
                     .mappings().one())
+
+    def router(self) -> ApprovalRouter:
+        return load_router(self.conn)
+
+    def next_step_sequence(self, claim_id: str) -> int:
+        return next_step_sequence(self.conn, "expense_claim_id", claim_id)
 
     def _claim_lines(self, claim_ids: list[str]) -> dict[str, list[dict]]:
         el = table("expense_line")
@@ -92,8 +102,8 @@ class SqlExpenseStore:
                 validation_detail=ln["validation_detail"]))
         common = {"request_type": RequestType.EXPENSE.value, "leave_request_id": None, "expense_claim_id": cid,
                   "submission_round": result.submission_round, "correlation_id": result.correlation_id}
-        write_events_and_exceptions(self.conn, common, result.events, result.validation.findings,
-                                    result.submitted_at)
+        write_events_and_exceptions(self.conn, common, result.events, result.findings, result.submitted_at)
+        write_steps(self.conn, result.steps, result.correlation_id)
         if result.budget_postings:
             t, b = table("cost_center_transaction"), table("cost_center_budget")
             ids = allocate_ids(self.conn, "cost_center_transaction", "CCT", len(result.budget_postings))

@@ -1,6 +1,7 @@
-"""Phase 5 services on the generated dataset, at both scales (no database):
-- the services agree with the independent oracle on every leave request; the only differences are the routing
-  codes of the Phase 7 engine, and exactly on the planted S19-L records (reported as ROUTING_PHASE7);
+"""Leave services on the generated dataset, at both scales (no database):
+- the services (with routing, Phase 7A) agree with the independent oracle on every leave request, including the
+  rule, the route and the approval steps; ROUTING_PHASE7 is 0 and exactly the planted S19-L records escalate with
+  NO_VALID_APPROVAL_PATH; every request in PENDING_APPROVAL has its steps;
 - leave detections equal the planted leave labels (expected DETECT), apart from S19-L;
 - the replay posts exactly the dataset's legacy USAGE rows (one usage rule, DEC-01);
 - the cross-year share meets ASM-042 at full scale (about 3 percent);
@@ -25,8 +26,11 @@ def test_services_agree_with_the_oracle_on_every_leave_request(gen):
     comp = compare(g.dataset, ROOT / "config")
     assert len(comp.rows) == vol["leave_requests"]
     assert comp.summary.get("DISAGREE", 0) == 0, comp.disagreements
-    routing = {r["record_id"] for r in comp.rows if r["result"] == "ROUTING_PHASE7"}
-    assert routing == _s19_leave(g)
+    assert comp.summary.get("ROUTING_PHASE7", 0) == 0
+    no_path = {r["record_id"] for r in comp.rows if "NO_VALID_APPROVAL_PATH" in r["actual_codes"].split("|")}
+    assert no_path == _s19_leave(g)
+    pending = [r for r in comp.rows if r["actual_status"] == "PENDING_APPROVAL"]
+    assert pending and all(int(r["steps"]) >= 1 and r["actual_route"] for r in pending)
 
 
 def test_leave_detections_equal_the_planted_leave_labels(gen):

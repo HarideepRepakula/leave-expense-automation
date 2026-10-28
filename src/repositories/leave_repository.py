@@ -6,7 +6,9 @@ employee's leave_balance rows on the request's policy, both FOR UPDATE, before t
 submissions of the same employee cannot both spend the same balance. No business rule lives here.
 
 IDs for request_status_event (RSE) and request_exception (REX) come from ops.id_sequence (DEC-32, base.py).
-Not yet: idempotency_record and audit_event rows (Phase 8), approval steps (Phase 7).
+Routing (Phase 7A) reads approval_rule, employee, department and delegation in the same transaction; approval_step
+rows and the ASSIGNED approval_event (APE) are written for PENDING_APPROVAL. Not yet: idempotency_record and
+audit_event rows (Phase 8).
 """
 from __future__ import annotations
 
@@ -14,7 +16,8 @@ import sqlalchemy as sa
 
 from src.common.enums import RequestType, WorkflowStatus
 from src.repositories.base import table as _t
-from src.repositories.base import write_events_and_exceptions
+from src.repositories.base import load_router, next_step_sequence, write_events_and_exceptions, write_steps
+from src.services.approval_routing import ApprovalRouter
 from src.services.calendar_service import HolidayCalendar
 from src.services.leave_request_service import LeaveContext, SubmissionResult
 
@@ -30,6 +33,12 @@ class SqlLeaveStore:
 
     def load_request(self, request_id: str) -> dict:
         return self._one("leave_request", "leave_request_id", request_id, lock=True)
+
+    def router(self) -> ApprovalRouter:
+        return load_router(self.conn)
+
+    def next_step_sequence(self, request_id: str) -> int:
+        return next_step_sequence(self.conn, "leave_request_id", request_id)
 
     def context(self, r: dict) -> LeaveContext:
         emp = self._one("employee", "employee_id", r["employee_id"])
@@ -62,4 +71,5 @@ class SqlLeaveStore:
         common = {"request_type": RequestType.LEAVE.value, "leave_request_id": result.request_id,
                   "expense_claim_id": None, "submission_round": result.submission_round,
                   "correlation_id": result.correlation_id}
-        write_events_and_exceptions(self.conn, common, result.events, v.findings, result.submitted_at)
+        write_events_and_exceptions(self.conn, common, result.events, result.findings, result.submitted_at)
+        write_steps(self.conn, result.steps, result.correlation_id)

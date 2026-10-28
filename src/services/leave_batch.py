@@ -10,6 +10,9 @@ Rules of the replay (ASM-P5-04):
   posted on its submission date when its turn comes (leave_balance_service.usage_postings).
 - Every other request is submitted as a DRAFT at its created_at instant through submit_leave().
 - Ledger rows other than USAGE are loaded up front; USAGE rows in the data are not, because the replay posts them.
+- With a router (Phase 7A) every submission is also routed and approval steps are created for PENDING_APPROVAL;
+  routing codes are part of codes() but not of submission_detections() (detections.csv holds validation findings
+  and batch detectors only, DEC-P7A-04). The generator guards replay without a router.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import uuid
 from dataclasses import dataclass
 
 from src.common.enums import DetectedBy, LeaveTxnType, LeaveType, WorkflowStatus
+from src.services.approval_routing import ApprovalRouter
 from src.services.calendar_service import HolidayCalendar
 from src.services.exception_service import ExceptionCatalogue
 from src.services.leave_balance_service import usage_postings
@@ -34,9 +38,9 @@ class LeaveReplay:
     detections: list[Detection]
 
     def codes(self, request_id: str) -> set[str]:
-        """Submission codes plus batch-detector codes of one request."""
+        """Submission codes (validation and routing) plus batch-detector codes of one request."""
         res = self.store.results.get(request_id)
-        found = set(res.validation.codes) if res else set()
+        found = set(res.codes) if res else set()
         return found | {d.exception_code for d in self.detections if d.record_id == request_id}
 
     def submission_detections(self) -> list[Detection]:
@@ -46,10 +50,11 @@ class LeaveReplay:
 
 def replay_leave(requests: list[dict], employees: dict[str, dict], policies: dict[str, dict],
                  calendar: HolidayCalendar, ledger: list[dict], balances: list[dict], catalogue: ExceptionCatalogue,
-                 legacy: frozenset[str] = frozenset()) -> LeaveReplay:
-    """`legacy`: extra request ids to treat as legacy approvals (the S5 guards use it before approving)."""
+                 legacy: frozenset[str] = frozenset(), router: ApprovalRouter | None = None) -> LeaveReplay:
+    """`legacy`: extra request ids to treat as legacy approvals (the S5 guards use it before approving).
+    `router`: route every submission (Phase 7A); None keeps the Phase 5 behaviour."""
     store = InMemoryLeaveStore(employees, policies, calendar,
-                               [t for t in ledger if t["txn_type"] != LeaveTxnType.USAGE.value], balances)
+                               [t for t in ledger if t["txn_type"] != LeaveTxnType.USAGE.value], balances, router)
     done = []
     for r in sorted((r for r in requests if r["workflow_status"] != WorkflowStatus.DRAFT.value),
                     key=lambda r: (r["created_at"], r["leave_request_id"])):

@@ -35,7 +35,8 @@ def _step(**over):
     base = dict(
         approval_step_id="APR-EXP-2026-000001-01", request_type="EXPENSE", leave_request_id=None,
         expense_claim_id="EXP-2026-000001", submission_round=1, sequence_no=1, approval_rule_id="RULE-E-001",
-        required_level="L1", approver_employee_id="EMP-000001", step_status="PENDING", assigned_at=T0,
+        required_level="L1", covered_levels=["L1"], approver_employee_id="EMP-000001", step_status="PENDING",
+        assigned_at=T0,
     )
     base.update(over)
     return base

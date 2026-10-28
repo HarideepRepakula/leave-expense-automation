@@ -7,7 +7,9 @@ Batch detectors over every submitted claim (drafts are invisible):
   class SUSPICIOUS_PATTERN as "suspected split claim, requires investigation" (AM-H3).
 
 replay_expense() submits every non-draft claim as a DRAFT at its created_at instant through submit_expense(), in
-submission order, on an in-memory store (ASM-P6-01). The dataset itself is not changed (AMB-P3-01).
+submission order, on an in-memory store (ASM-P6-01). The dataset itself is not changed (AMB-P3-01). With a router
+(Phase 7A) every submission is also routed; routing codes are part of codes() but not of submission_detections()
+(DEC-P7A-04).
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import uuid
 from dataclasses import dataclass
 
 from src.common.enums import DetectedBy, WorkflowStatus
+from src.services.approval_routing import ApprovalRouter
 from src.services.exception_service import ExceptionCatalogue
 from src.services.expense_service import DetectionParams, InMemoryExpenseStore, claim_hashes, current_lines, \
     split_groups, submit_expense
@@ -64,7 +67,7 @@ class ExpenseReplay:
 
     def codes(self, claim_id: str) -> set[str]:
         res = self.store.results.get(claim_id)
-        found = set(res.validation.codes) if res else set()
+        found = set(res.codes) if res else set()
         return found | {d.exception_code for d in self.detections if d.record_id == claim_id}
 
     def submission_detections(self) -> list[Detection]:
@@ -73,12 +76,13 @@ class ExpenseReplay:
 
 
 def replay_expense(tables: dict[str, list[dict]], catalogue: ExceptionCatalogue, params: DetectionParams,
-                   claims: list[dict] | None = None) -> ExpenseReplay:
+                   claims: list[dict] | None = None, router: ApprovalRouter | None = None) -> ExpenseReplay:
     """`tables`: the ops tables (employee, expense_policy, fx_rate, cost_center, cost_center_budget, receipt,
-    cost_center_transaction, expense_line); `claims` defaults to tables["expense_claim"]."""
+    cost_center_transaction, expense_line); `claims` defaults to tables["expense_claim"]; `router`: route every
+    submission (Phase 7A), None keeps the Phase 6 behaviour."""
     store = InMemoryExpenseStore({e["employee_id"]: e for e in tables["employee"]}, tables["expense_policy"],
                                  tables["fx_rate"], tables["cost_center"], tables["cost_center_budget"],
-                                 tables["receipt"], tables.get("cost_center_transaction", []), params)
+                                 tables["receipt"], tables.get("cost_center_transaction", []), params, router)
     lines: dict[str, list[dict]] = {}
     for ln in tables["expense_line"]:
         lines.setdefault(ln["expense_claim_id"], []).append(ln)

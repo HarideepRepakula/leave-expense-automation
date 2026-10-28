@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
 Current phase: Phase 7A (routing and approval steps; Phase 7 split into 7A and 7B, owner 2026-10-28)
-Status: NOT STARTED. Begin in a new conversation with the owner's 7A prompt. Stop for "APPROVED PHASE 7A".
+Status: COMPLETE, awaiting "APPROVED PHASE 7A". Not committed. Next: Phase 7B (after approval).
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -35,6 +35,61 @@ Phase 7 plan (owner 2026-10-28):
        Dataset change decided in 7B and shown to the owner BEFORE it is made; not touched in 7A.
   S22 timing (proposed for 7B): decisions at 17:00 UTC on a business day at least one business day after
        assignment, so an S22 partner submitted at most 24 h earlier is never decided first (closes AMB-P4-04).
+
+## Phase 7A record
+
+Scope implemented (docs/05 5.1-5.4; owner 7A plan): oracle budget change (DEC-P7A-03); routing service
+src/services/approval_routing.py over approval_rule rows (bands lower-exclusive / upper-inclusive, highest priority,
+RULE_CONFLICT on equal priority with different levels, lowest id on equal outcome, NO_VALID_APPROVAL_PATH when no
+rule matches or a level is unresolved); L1-L5 with substitution, delegation and covered_levels (one step per person at
+the highest level); migration 0002 approval_step.covered_levels JSONB NOT NULL + 3 CHECKs; steps at submission for
+PENDING_APPROVAL in memory and in both PostgreSQL stores (step 1 assigned + approval_event ASSIGNED); both comparisons
+extended to codes incl. routing, rule, route and steps. Services import nothing from src/reference (test passes).
+Dataset unchanged (verified file by file). Waits for 7B: decisions, attempts, idempotency, resubmission, process-owner
+decisions, S6 timing, CARRY_FORWARD rows, S19 / S22 data.
+
+Files created: src/services/approval_routing.py; migrations/versions/0002_step_covered_levels.py;
+tests/unit/test_approval_routing.py; tests/db/test_approval_steps_db.py.
+Files changed: src/reference/oracle.py (budget); src/services/{exception_service,leave_request_service,expense_service,
+leave_batch,expense_batch}.py; src/repositories/{base,leave_repository,expense_repository}.py; src/models/approvals.py;
+migrations/versions/0001_initial_schema.py (LATER_COLUMNS, DEC-P7A-02); src/evaluation/{leave,expense}_service_vs_oracle.py;
+tests/conftest.py (insert_seed, insert_configured_rules, approved_claim covered_levels); tests/db/{test_leave_submission_db,
+test_expense_submission_db,test_immutability_triggers,test_request_fk_exactly_one,test_roles_and_migration_cycle}.py;
+tests/data/test_{leave,expense}_services_on_dataset.py; tests/reference/test_reference_oracle.py; docs/05 (L5, 5.4 note),
+docs/09 (section 11), docs/10 (covered_levels), docs/15; pyproject.toml (0.7.0a1). No new packages.
+
+Commands:
+    alembic upgrade head            # lea_dev: 0001_initial_schema -> 0002_step_covered_levels
+    python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+    python -m src.validation
+    python -m src.evaluation.expense_service_vs_oracle
+    python -m src.evaluation.leave_service_vs_oracle
+    .\scriptseproducibility_check.ps1
+    pytest -q
+
+REAL results (2026-10-28):
+- alembic upgrade head on lea_dev: "Running upgrade 0001_initial_schema -> 0002_step_covered_levels"; current = head.
+- Generate --load: exit 0; lea_dev expense_claim 1000, expense_line 3201, receipt 2927, leave_request 800,
+  leave_balance_transaction 13086, approval_step 0; ground_truth 1800 / 1057. Fingerprint 0a84321b... = Phase 6.
+- File by file: 54 of 54 files identical SHA-256 to the committed manifest; git shows no change under data/.
+- Validation: 21 checks, 0 failed, 7 not applicable; M1 0/24924, M2 0/30350, M3 6958/6958 = 1.0.
+- Expense comparison: 1000 (DRAFT 8, SUBMITTED 992): AGREE 1000, ROUTING_PHASE7 0, DISAGREE 0; routed 958; 1580 steps
+  on 901 claims in PENDING_APPROVAL. Leave: 800 (DRAFT 8, LEGACY 24, SUBMITTED 768): AGREE 800, ROUTING_PHASE7 0,
+  DISAGREE 0; routed 748; 941 steps on 736 requests. The 8 S19 records escalate with NO_VALID_APPROVAL_PATH.
+  Route content checked: 65 routed records have a step covering several levels, 12 a delegated step, 17 claims L5.
+- reproducibility_check.ps1: 54 files, 54 identical, RESULT: REPRODUCIBLE, exit 0.
+- pytest -q: 433 passed in 47.21s (384 + 49 new). ruff --select F,E9 src tests migrations: All checks passed.
+Debugging: (1) test_second_submission... expected id_sequence {RSE, REX}; the clean first request now also writes an
+APE event; expectation updated. (2) Migration test with hand-written SQL rows hit NOT NULL columns; replaced by the
+shared seed graph (insert_seed). (3) Oracle budget test confirmed to FAIL on the old oracle and pass on the new one.
+
+Open issues / for owner decision: AMB-P7A-01..04 (docs/09 11.3). S19 dataset change (one G7 per country) to be shown
+before it is made, in 7B. JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
+
+Acceptance criteria after Phase 7A: 1-8, 13, 17, 21 MET (1 now incl. migration 0002 both ways); 9 approval routing
+PARTIAL (routes and steps, agreed with the oracle on every record; decisions in 7B); 10 self-approval PARTIAL (routing
+never assigns the requester, DB trigger; attempt guards in 7B); 12, 16, 18, 22 PARTIAL; 11, 14, 15, 19, 20 PARTIAL or
+NOT STARTED.
 
 ## Phase 6 record
 

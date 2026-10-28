@@ -135,6 +135,11 @@ def expect_db_error(conn: sa.Connection, statement, *, match: str | None = None)
 @pytest.fixture()
 def seed(conn: sa.Connection, tables: dict[str, sa.Table]) -> dict:
     """Minimal valid object graph used by constraint tests. Values are synthetic."""
+    return insert_seed(conn, tables)
+
+
+def insert_seed(conn: sa.Connection, tables: dict[str, sa.Table]) -> dict:
+    """The rows of the `seed` fixture, on any connection (the migration test commits them at revision 0001)."""
     t = tables
     conn.execute(
         sa.insert(t["ops.department"]).values(
@@ -211,8 +216,24 @@ def seed(conn: sa.Connection, tables: dict[str, sa.Table]) -> dict:
     return {"manager": "EMP-000001", "requester": "EMP-000002", "corr": CORR, "t0": T0}
 
 
-def approved_claim(conn: sa.Connection, tables: dict[str, sa.Table], claim_id: str = "EXP-2026-000001") -> str:
-    """Insert an APPROVED expense claim with one line and one approved L1 step; return the step id."""
+def insert_configured_rules(conn: sa.Connection, tables: dict[str, sa.Table]) -> None:
+    """The approval_rule rows of config/approval_rules.yaml (as stage S1 builds them) that are not there yet."""
+    import yaml
+
+    from src.data.stages.master import _approval_rules
+
+    t = tables["ops.approval_rule"]
+    have = set(conn.execute(sa.select(t.c.approval_rule_id)).scalars())
+    cfg = {"approval_rules": yaml.safe_load((ROOT / "config" / "approval_rules.yaml").read_text(encoding="utf-8"))}
+    rows = [r for r in _approval_rules(cfg) if r["approval_rule_id"] not in have]
+    if rows:
+        conn.execute(sa.insert(t), rows)
+
+
+def approved_claim(conn: sa.Connection, tables: dict[str, sa.Table], claim_id: str = "EXP-2026-000001",
+                   covered_levels: tuple[str, ...] | None = ("L1",)) -> str:
+    """Insert an APPROVED expense claim with one line and one approved L1 step; return the step id.
+    covered_levels=None leaves the column out (a schema before migration 0002)."""
     t = tables
     conn.execute(
         sa.insert(t["ops.expense_claim"]).values(
@@ -240,6 +261,7 @@ def approved_claim(conn: sa.Connection, tables: dict[str, sa.Table], claim_id: s
             approver_employee_id="EMP-000001", delegated_from_employee_id=None, step_status="APPROVED",
             assigned_at=T0, decision_at=datetime(2026, 1, 16, 10, 0, tzinfo=timezone.utc),
             decision_reason_code="APPROVED_CLEAN", decision_comment=None,
+            **({} if covered_levels is None else {"covered_levels": list(covered_levels)}),
         )
     )
     return step_id

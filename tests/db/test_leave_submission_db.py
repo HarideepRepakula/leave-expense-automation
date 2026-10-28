@@ -15,7 +15,7 @@ from src.repositories.leave_repository import SqlLeaveStore
 from src.services.exception_service import ExceptionCatalogue
 from src.services.leave_balance_service import accrual_schedule
 from src.services.leave_request_service import submit_leave
-from tests.conftest import ROOT, T0
+from tests.conftest import ROOT, T0, insert_configured_rules
 
 pytestmark = pytest.mark.db
 
@@ -38,6 +38,7 @@ def world(conn, tables, seed):
          "default_route": ROUTE[c["severity"]], "requester_message_template": c["requester"],
          "analyst_message_template": c["analyst"]}
         for c in CODES["codes"] if c["code"] not in have])
+    insert_configured_rules(conn, t)
     lp = t["ops.leave_policy"]
     policy = dict(conn.execute(sa.select(lp).where(lp.c.leave_policy_id == "LPOL-ANNUAL-IN-V1")).mappings().one())
     accruals = accrual_schedule(policy, date(2022, 6, 15), None, 2026, SUBMIT.date())
@@ -95,7 +96,9 @@ def test_second_submission_sees_the_first_as_a_reservation_and_overlap(conn, wor
                                               ("OVERLAPPING_PENDING_LEAVE", "SUBMISSION")]
     assert [i for i, _, _ in stored] == ["REX-000000001", "REX-000000002"]
     seq = world["ops.id_sequence"]
-    assert dict(conn.execute(sa.select(seq.c.sequence_scope, seq.c.next_value)).all()) == {"RSE": 7, "REX": 3}
+    # APE: the first (clean) request got its approval step and one ASSIGNED event (Phase 7A); the rejected one none.
+    assert dict(conn.execute(sa.select(seq.c.sequence_scope, seq.c.next_value)).all()) == \
+        {"RSE": 7, "REX": 3, "APE": 2}
 
 
 def test_submit_locks_the_request_and_the_balance_rows(conn, world):

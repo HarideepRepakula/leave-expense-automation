@@ -6,7 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 
-from tests.conftest import ROOT, apply_test_only_constraints, run_alembic
+from tests.conftest import ROOT, apply_test_only_constraints, approved_claim, insert_seed, run_alembic
 
 pytestmark = pytest.mark.db
 
@@ -79,7 +79,43 @@ def test_migration_downgrade_and_upgrade_cycle(engine, test_url):
     assert "ops" in insp.get_schema_names() and "ground_truth" in insp.get_schema_names()
     with engine.connect() as conn:
         version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0001_initial_schema"
+    assert version == "0002_step_covered_levels"
+
+
+def _step_columns(engine) -> dict[str, dict]:
+    return {c["name"]: c for c in sa.inspect(engine).get_columns("approval_step", schema="ops")}
+
+
+def _step_checks(engine) -> dict[str, str]:
+    return {c["name"]: c["sqltext"] for c in sa.inspect(engine).get_check_constraints("approval_step", schema="ops")}
+
+
+def test_migration_0002_covered_levels_down_and_up(engine, test_url, tables):
+    """0002 alone: downgrade to 0001 removes covered_levels and its CHECKs (0001 is exactly the 0001 schema);
+    upgrade adds it back as JSONB NOT NULL with the CHECK names the model declares; a decided step that existed
+    before 0002 is backfilled with [required_level] and is still frozen afterwards."""
+    from src.models.approvals import COVERED_LEVELS_CHECKS
+
+    names = {f"ck_approval_step_{n}" for n in COVERED_LEVELS_CHECKS}
+    try:
+        run_alembic(test_url, "downgrade", "0001_initial_schema")
+        assert "covered_levels" not in _step_columns(engine)
+        assert not names & set(_step_checks(engine))
+        with engine.begin() as conn:      # the seed graph and one decided step, created before 0002
+            insert_seed(conn, tables)
+            approved_claim(conn, tables, covered_levels=None)
+        run_alembic(test_url, "upgrade", "0002_step_covered_levels")
+        col = _step_columns(engine)["covered_levels"]
+        assert not col["nullable"] and col["type"].__class__.__name__ == "JSONB"
+        assert names <= set(_step_checks(engine))
+        with engine.begin() as conn:
+            assert conn.execute(sa.text("SELECT covered_levels FROM ops.approval_step")).scalar_one() == ["L1"]
+        with pytest.raises(DBAPIError, match="cannot be modified"), engine.begin() as conn:
+            conn.execute(sa.text("UPDATE ops.approval_step SET decision_comment = 'x'"))
+    finally:
+        run_alembic(test_url, "downgrade", "base")
+        run_alembic(test_url, "upgrade", "head")
+        apply_test_only_constraints(engine)
 
 
 def test_sql_files_referenced_by_migration_exist():

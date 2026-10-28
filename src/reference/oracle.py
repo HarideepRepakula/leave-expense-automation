@@ -8,8 +8,10 @@ routing and every check are re-implemented here in plain table-driven Python (DE
 Timing (ASM-P4-03): decision delays, resubmissions and payments belong to stage S6 (Phase 7). Until then the
 expected status is the EVENTUAL outcome with no time limit: clean -> APPROVED; HARD -> REJECTED; CORRECTABLE ->
 RETURNED_FOR_CORRECTION; SOFT -> the simulated process-owner decision (docs/05 9.5), else ESCALATED_FOR_REVIEW.
-An earlier request whose eventual outcome holds balance, budget or dates (APPROVED or ESCALATED) is treated as
-still pending when a later request is checked against it (ASM-P4-04).
+An earlier request whose eventual outcome holds balance or dates (APPROVED or ESCALATED) is treated as still
+pending when a later request is checked against it (ASM-P4-04). Budget (BR-BUD-02..04, owner decision on AMB-P6-01,
+Phase 7A): a claim's reservation is kept unless validation itself rejects or returns the claim (a HARD or
+CORRECTABLE submission code); an escalated claim keeps it until the final decision, whatever that decision is.
 """
 from __future__ import annotations
 
@@ -519,7 +521,8 @@ class Oracle:
                 x.eligible = x.approved_amount > 0
             else:
                 x.eligible = False
-            if x.final_status in HOLDS and budget is not None:
+            validation_releases = {self.cfg.severity[k] for k in codes} & {"HARD", "CORRECTABLE"}
+            if budget is not None and not validation_releases:          # BR-BUD-02/04 (AMB-P6-01)
                 budget_used[bkey] = budget_used.get(bkey, ZERO) + total
             for h in hashes:
                 seen_hashes.setdefault(h, []).append(c["employee_id"])

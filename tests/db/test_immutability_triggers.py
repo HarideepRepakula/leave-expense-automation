@@ -83,6 +83,7 @@ def test_decided_step_is_frozen_but_pending_step_is_not(conn, tables, seed):
         sa.insert(t).values(
             approval_step_id="APR-EXP-2026-000002-01", request_type="EXPENSE", expense_claim_id="EXP-2026-000002",
             submission_round=1, sequence_no=1, approval_rule_id="RULE-E-001", required_level="L1",
+            covered_levels=["L1"],
             approver_employee_id="EMP-000001", step_status="PENDING", assigned_at=T0,
         )
     )
@@ -108,6 +109,7 @@ def test_self_approval_step_rejected_by_trigger(conn, tables, seed):
         sa.insert(tables["ops.approval_step"]).values(
             approval_step_id="APR-EXP-2026-000003-01", request_type="EXPENSE", expense_claim_id="EXP-2026-000003",
             submission_round=1, sequence_no=1, approval_rule_id="RULE-E-001", required_level="L1",
+            covered_levels=["L1"],
             approver_employee_id="EMP-000002", step_status="PENDING", assigned_at=T0,
         ),
         match="self-approval",

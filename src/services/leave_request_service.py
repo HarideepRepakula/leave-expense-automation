@@ -6,19 +6,24 @@ codes, not only the deciding one); the route then follows the severity precedenc
 submit_leave() moves a DRAFT through SUBMITTED and VALIDATING to its outcome on any LeaveStore: the in-memory store
 below (generator guards, replay, tests) or the PostgreSQL store in src/repositories/leave_repository.py.
 
-Not here yet, by phase: routing, approval steps, NO_VALID_APPROVAL_PATH and RULE_CONFLICT (Phase 7), so a clean
-request ends in PENDING_APPROVAL without steps; resubmission (Phase 7); audit_event rows and idempotency keys
-(Phase 8). USAGE is posted at approval (Phase 7) through leave_balance_service.usage_postings.
+Routing (Phase 7A, approval_routing): when the store has a router and validation neither rejects nor returns, the
+request is routed on its leave type and quantity as of the submission date; NO_VALID_APPROVAL_PATH / RULE_CONFLICT
+join the codes (SOFT -> ESCALATED_FOR_REVIEW). Approval steps are created only for an outcome of PENDING_APPROVAL.
+A store without a router (the generator guards) does no routing, as in Phase 5.
+
+Not here yet, by phase: decisions and resubmission (Phase 7B); audit_event rows and idempotency keys (Phase 8).
+USAGE is posted at approval (Phase 7B) through leave_balance_service.usage_postings.
 """
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 
-from src.common.enums import LeaveType, WorkflowStatus
+from src.common.enums import LeaveType, RequestType, WorkflowStatus
+from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
 from src.services.calendar_service import (
     HolidayCalendar,
     half_days_on_non_business_days,
@@ -187,16 +192,31 @@ class SubmissionResult:
     validation: LeaveValidation
     classification: Classification
     events: list[dict]              # request_status_event payloads, in order
+    routing: Routing | None = None  # None when not routed (rejected/returned, or a store without a router)
+    steps: list[dict] = field(default_factory=list)   # approval_step rows (PENDING_APPROVAL only)
 
     @property
     def status(self) -> str:
         return self.classification.status_after_validation
+
+    @property
+    def findings(self) -> list[Finding]:
+        """Validation findings, then the routing finding (one request_exception row each)."""
+        return self.validation.findings + (self.routing.findings if self.routing else [])
+
+    @property
+    def codes(self) -> list[str]:
+        return [f.code for f in self.findings]
 
 
 class LeaveStore(Protocol):
     def load_request(self, request_id: str) -> dict: ...
 
     def context(self, r: dict) -> LeaveContext: ...
+
+    def router(self) -> ApprovalRouter | None: ...
+
+    def next_step_sequence(self, request_id: str) -> int: ...
 
     def record_submission(self, result: SubmissionResult) -> None: ...
 
@@ -212,7 +232,13 @@ def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalog
                                 f"Phase 7")
     ctx = store.context(r)
     validation = validate_leave(r, ctx, at)
-    classification = catalogue.classify(validation.codes)
+    router = store.router()
+    routing = None
+    if router is not None and not catalogue.rejects_or_returns(validation.codes):
+        routing = router.route(RequestType.LEAVE.value, r["employee_id"], ctx.policy["leave_type"],
+                               validation.quantity, at.date())
+    codes = validation.codes + [f.code for f in (routing.findings if routing else [])]
+    classification = catalogue.classify(codes)
     path = [WorkflowStatus.DRAFT.value, WorkflowStatus.SUBMITTED.value, WorkflowStatus.VALIDATING.value,
             classification.status_after_validation]
     events = []
@@ -223,21 +249,26 @@ def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalog
             "previous_status": prev, "new_status": new, "occurred_at": at,
             "actor_id": actor_id if new == WorkflowStatus.SUBMITTED.value else None,   # NULL = system
             "reason_code": classification.decision_reason_code if last else None,
-            "calculated_values": calculated_values(validation, classification) if last else None,
+            "calculated_values": calculated_values(validation, classification, codes, routing) if last else None,
         })
+    steps = []
+    if routing is not None and classification.status_after_validation == WorkflowStatus.PENDING_APPROVAL.value:
+        steps = build_steps(RequestType.LEAVE.value, request_id, r["current_round"], routing, at,
+                            store.next_step_sequence(request_id))
     result = SubmissionResult(request_id, r["current_round"], at, actor_id, correlation_id, validation,
-                              classification, events)
+                              classification, events, routing, steps)
     store.record_submission(result)
     return result
 
 
-def calculated_values(v: LeaveValidation, c: Classification) -> dict:
+def calculated_values(v: LeaveValidation, c: Classification, codes: list[str], routing: Routing | None) -> dict:
     """The derived values recorded on the outcome event (docs/06 7.1); decimals as text so the JSON is exact."""
     return {
         "business_day_count": v.business_days, "requested_quantity": str(v.quantity),
         "quantity_by_year": {str(y): str(q) for y, q in sorted(v.parts.items())},
         "balances": {str(y): {k: str(x) for k, x in b.items()} for y, b in sorted(v.balances.items())},
-        "exception_codes": v.codes, "exception_class": c.exception_class,
+        "exception_codes": codes, "exception_class": c.exception_class,
+        **(routing.as_values() if routing else {}),
     }
 
 
@@ -246,8 +277,8 @@ class InMemoryLeaveStore:
     """A LeaveStore over plain rows (generator guards, the replay, unit tests). Same contract as the DB store."""
 
     def __init__(self, employees: dict[str, dict], policies: dict[str, dict], calendar: HolidayCalendar,
-                 ledger: list[dict], balances: list[dict]) -> None:
-        self.employees, self.policies, self.calendar = employees, policies, calendar
+                 ledger: list[dict], balances: list[dict], router: ApprovalRouter | None = None) -> None:
+        self.employees, self.policies, self.calendar, self._router = employees, policies, calendar, router
         self.balance_owner = {b["leave_balance_id"]: (b["employee_id"], b["leave_policy_id"]) for b in balances}
         self.years: dict[tuple[str, str], set[int]] = {}
         for b in balances:
@@ -259,6 +290,14 @@ class InMemoryLeaveStore:
         self.results: dict[str, SubmissionResult] = {}
         self.status_events: list[dict] = []
         self.exceptions: list[dict] = []
+        self.steps: dict[str, list[dict]] = {}
+        self.approval_events: list[dict] = []
+
+    def router(self) -> ApprovalRouter | None:
+        return self._router
+
+    def next_step_sequence(self, request_id: str) -> int:
+        return len(self.steps.get(request_id, [])) + 1
 
     def post(self, rows: list[dict]) -> None:
         for t in rows:
@@ -300,7 +339,10 @@ class InMemoryLeaveStore:
         for e in result.events:
             self.status_events.append({"request_id": result.request_id, "submission_round": result.submission_round,
                                        "correlation_id": result.correlation_id, **e})
-        for f in v.findings:
+        for f in result.findings:
             self.exceptions.append({"request_id": result.request_id, "submission_round": result.submission_round,
                                     "exception_code": f.code, "detail": f.detail, "detected_at": result.submitted_at,
                                     "detected_by": "SUBMISSION", "correlation_id": result.correlation_id})
+        if result.steps:
+            self.steps.setdefault(result.request_id, []).extend(result.steps)
+            self.approval_events.append(assignment_event(result.steps[0], result.correlation_id))

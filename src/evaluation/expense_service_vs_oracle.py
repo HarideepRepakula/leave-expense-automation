@@ -1,10 +1,11 @@
-"""Phase 6 check: the expense services against the independent oracle, claim by claim (DEC-01, RK-15).
+"""Expense services against the independent oracle, claim by claim (DEC-01, RK-15; Phase 6, routes from 7A).
 
 Only this evaluation package reads both src/services (through expense_batch.replay_expense) and src/reference. For
-every claim it compares: exception codes (submission + batch detectors), the status right after validation
-(oracle submission codes mapped by severity, as in leave_service_vs_oracle), the USD total, the primary category
-and, when the oracle expects APPROVED, the approved amount (BR-EX-14). Routing codes belong to Phase 7 and every
-claim that carries one in the oracle is reported as ROUTING_PHASE7, never as agreement.
+every claim it compares: exception codes (submission incl. routing + batch detectors), the status right after
+validation and routing (oracle submission codes mapped by severity, as in leave_service_vs_oracle), the USD total,
+the primary category, when the oracle expects APPROVED the approved amount (BR-EX-14), and (Phase 7A) the approval
+rule, the route and the approval steps (exactly the route when PENDING_APPROVAL, none otherwise). ROUTING_PHASE7 can
+no longer occur; it is printed (always 0) so the report shows it.
 
     python -m src.evaluation.expense_service_vs_oracle [--raw data/raw] [--out data/validation]
 """
@@ -19,14 +20,16 @@ from pathlib import Path
 
 import yaml
 
-from src.evaluation.leave_service_vs_oracle import ROOT, ROUTING_CODES, STATUS_BY_SEVERITY
+from src.evaluation.leave_service_vs_oracle import ROOT, STATUS_BY_SEVERITY, actual_route, expected_route, \
+    print_summary, router_from, steps_match
 from src.reference.oracle import Oracle
 from src.services.exception_service import ExceptionCatalogue
 from src.services.expense_batch import ExpenseReplay, replay_expense
 from src.services.expense_service import DetectionParams
 
 COLUMNS = ["record_id", "employee_id", "kind", "expected_codes", "actual_codes", "expected_status", "actual_status",
-           "oracle_final_status", "expected_usd", "actual_usd", "expected_approved", "actual_approved", "result"]
+           "oracle_final_status", "expected_usd", "actual_usd", "expected_approved", "actual_approved",
+           "expected_route", "actual_route", "steps", "result"]
 
 
 @dataclass
@@ -49,35 +52,38 @@ def compare(tables: dict[str, list[dict]], config_dir: Path) -> Comparison:
     params = DetectionParams.from_config(
         yaml.safe_load((config_dir / "expense_policies.yaml").read_text(encoding="utf-8")))
     expected = Oracle(tables, config_dir).expenses()
-    replay = replay_expense(tables, ExceptionCatalogue.from_config(codes_cfg), params)
+    replay = replay_expense(tables, ExceptionCatalogue.from_config(codes_cfg), params, router=router_from(tables))
 
     rows = []
     for c in sorted(tables["expense_claim"], key=lambda c: c["expense_claim_id"]):
         cid, x = c["expense_claim_id"], expected[c["expense_claim_id"]]
         res = replay.store.results.get(cid)
-        routing = set(x.codes) & ROUTING_CODES
-        exp_codes, act_codes = set(x.codes) - ROUTING_CODES, replay.codes(cid) - ROUTING_CODES
+        exp_codes, act_codes = set(x.codes), replay.codes(cid)
+        exp_route, act_route = expected_route(x), actual_route(res.routing if res else None)
         if res is None:
             kind, exp_status, act_status = "DRAFT", "DRAFT", "DRAFT"
             exp_usd = act_usd = exp_appr = act_appr = ""
-            same = exp_codes == act_codes
+            steps_ok, steps = steps_match(res, act_status)
+            same = exp_codes == act_codes and exp_route == act_route
         else:
             kind = "SUBMITTED"
-            sev = {severity[k] for k in x.submission_codes - ROUTING_CODES}
+            sev = {severity[k] for k in x.submission_codes}
             exp_status = next((STATUS_BY_SEVERITY[s] for s in ("HARD", "CORRECTABLE", "SOFT") if s in sev),
                               "PENDING_APPROVAL")
             act_status, v = res.status, res.validation
             exp_usd, act_usd = str(x.facts["usd"]), str(v.usd)
             exp_appr = "" if x.approved_amount is None else str(x.approved_amount)
             act_appr = str(v.approved_amount) if x.approved_amount is not None else ""
+            steps_ok, steps = steps_match(res, act_status)
             same = (exp_codes == act_codes and exp_status == act_status and exp_usd == act_usd
-                    and x.facts["primary_category"] == v.primary_category and exp_appr == act_appr)
-        result = "ROUTING_PHASE7" if routing and same else "AGREE" if same else "DISAGREE"
+                    and x.facts["primary_category"] == v.primary_category and exp_appr == act_appr
+                    and exp_route == act_route and steps_ok)
         rows.append({"record_id": cid, "employee_id": c["employee_id"], "kind": kind,
-                     "expected_codes": "|".join(sorted(exp_codes | routing)), "actual_codes": "|".join(sorted(act_codes)),
+                     "expected_codes": "|".join(sorted(exp_codes)), "actual_codes": "|".join(sorted(act_codes)),
                      "expected_status": exp_status, "actual_status": act_status, "oracle_final_status": x.final_status,
                      "expected_usd": exp_usd, "actual_usd": act_usd, "expected_approved": exp_appr,
-                     "actual_approved": act_appr, "result": result})
+                     "actual_approved": act_appr, "expected_route": exp_route, "actual_route": act_route,
+                     "steps": steps, "result": "AGREE" if same and steps_ok else "DISAGREE"})
     return Comparison(rows, replay)
 
 
@@ -98,13 +104,13 @@ def main(argv: list[str] | None = None) -> int:
         w.writerows(comp.rows)
     kinds = Counter(r["kind"] for r in comp.rows)
     print(f"Expense claims compared: {len(comp.rows)} ({', '.join(f'{k} {v}' for k, v in sorted(kinds.items()))})")
-    for result, n in sorted(comp.summary.items()):
-        print(f"  {result:<15}{n:>5}")
+    print_summary(comp.rows)
     for r in comp.disagreements:
         print(f"  {r['result']} {r['record_id']}: codes expected [{r['expected_codes']}] actual [{r['actual_codes']}]; "
               f"status after validation expected {r['expected_status']} actual {r['actual_status']} (oracle final "
               f"{r['oracle_final_status']}); usd {r['expected_usd']}/{r['actual_usd']}; approved "
-              f"{r['expected_approved'] or '-'}/{r['actual_approved'] or '-'}")
+              f"{r['expected_approved'] or '-'}/{r['actual_approved'] or '-'}; route [{r['expected_route']}] / "
+              f"[{r['actual_route']}]; steps {r['steps']}")
     print(f"Detail: {path}")
     return 1 if comp.summary.get("DISAGREE") else 0
 

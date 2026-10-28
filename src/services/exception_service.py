@@ -76,6 +76,10 @@ class ExceptionCatalogue:
         except KeyError:
             raise KeyError(f"exception code {code} is not in the catalogue") from None
 
+    def rejects_or_returns(self, codes) -> bool:
+        """True when validation alone already decides REJECTED or RETURNED_FOR_CORRECTION: no routing then."""
+        return any(self.info(c).severity in (Severity.HARD, Severity.CORRECTABLE) for c in codes)
+
     def classify(self, codes) -> Classification:
         """docs/05 9.2/9.3: the highest severity decides the route; INFO or nothing -> PENDING_APPROVAL."""
         infos = sorted({self.info(c) for c in codes}, key=lambda i: i.order)

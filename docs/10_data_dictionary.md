@@ -339,7 +339,7 @@ Why: append-only budget ledger; available = budget - actual - committed (AM-B11,
 ## 5. Approval workflow
 
 ### ops.approval_step
-Why: core entity (spec 7.10). One required approval in a round. Real FKs with exactly one request set (DEC-03). Decided steps are frozen by trigger; no step may be assigned to the requester (trigger).
+Why: core entity (spec 7.10). One required approval in a round; one step per person, covering every level that person resolves for (covered_levels). Real FKs with exactly one request set (DEC-03). Decided steps are frozen by trigger; no step may be assigned to the requester (trigger). Created at submission for requests that end in PENDING_APPROVAL (Phase 7A); the first step is assigned at once and gets an ASSIGNED approval_event.
 
 | Field | Type | Req | Key | Allowed values / units | Default | Validation | Origin |
 |---|---|---|---|---|---|---|---|
@@ -350,7 +350,8 @@ Why: core entity (spec 7.10). One required approval in a round. Real FKs with ex
 | submission_round | int | yes | | | | >= 1 | SYS |
 | sequence_no | int | yes | | continues across rounds (AM-A5) | | >= 1; UQ per request | SYS |
 | approval_rule_id | text | yes | FK approval_rule | | | | CALC |
-| required_level | text | yes | | L1..L5 | | enum | CALC |
+| required_level | text | yes | | L1..L5 | | enum; the highest level in covered_levels | CALC |
+| covered_levels | jsonb | yes | | array of the levels this one step covers, in level order, e.g. ["L1", "L2"] when the direct manager is the top of the chain (ASM-030, AMB-P3-03) | | non-empty array; contains required_level; elements in L1..L5 (3 CHECKs). Added by migration 0002 (Phase 7A); rows that existed before were backfilled with [required_level] | CALC |
 | approver_employee_id | text | no | FK employee | resolved person or delegate | NULL only when cancelled before assignment | <> requester (trigger) | CALC |
 | delegated_from_employee_id | text | no | FK employee | original approver when a delegate acts | NULL | <> approver_employee_id | CALC |
 | step_status | text | yes | | PENDING, APPROVED, REJECTED, SKIPPED, CANCELLED | PENDING | enum; frozen once not PENDING | SYS |

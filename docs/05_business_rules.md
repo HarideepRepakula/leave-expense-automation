@@ -82,7 +82,7 @@ Order of checks is fixed; all checks run and all failing codes are recorded, the
 | L2 | Skip-level manager | manager of L1 |
 | L3 | Department head | department.head_employee_id of requester's department |
 | L4 | Finance controller | employee with is_finance_controller and same country as requester (one per country, ASM-014) |
-| L5 | CFO-level | employee with grade G7 (exactly one, ASM-014) |
+| L5 | CFO-level | the employee with grade G7 in the requester's country (owner decision S19 option a, each the only G7 of its country); while a country has none and the organisation has exactly one G7, that one (AMB-P7A-01) |
 
 Authority rank: L1 < L2 < L3 < L4 < L5. An approver "holds" a level if they are the resolved person for that level for this requester, or hold a higher level in the same chain (a department head may act at L1 or L2 for their own department). Finance roles (L4, L5) are chain-independent.
 
@@ -121,7 +121,7 @@ Rules are effective 2025-01-01 with open end. A test fixture adds RULE-E-005 (eq
 | Resolved approver TERMINATED or employment_end < routing date | Active delegation for that approver covering the routing date -> delegate acts (approval_step.delegated_from_employee_id set); else next person up the chain; else unresolved |
 | Resolved approver has an active delegation (on leave) | Delegate acts |
 | Requester is G7 (top of chain) | L1/L2/L3 unresolved -> NO_VALID_APPROVAL_PATH |
-| L1 is the G7 (root), so no skip-level exists for L2 (decided AMB-P3-03, 2026-10-28) | The G7 covers L2. Create ONE approval step for the G7 that records both levels it covers (L1 and L2), never two identical steps for the same person. Not NO_VALID_APPROVAL_PATH. Schema note for Phase 7: approval_step holds a single required_level today; a covered-levels column is added by a Phase 7 migration |
+| L1 is the G7 (root), so no skip-level exists for L2 (decided AMB-P3-03, 2026-10-28) | The G7 covers L2. Create ONE approval step for the G7 that records both levels it covers (L1 and L2), never two identical steps for the same person. Not NO_VALID_APPROVAL_PATH. approval_step.covered_levels (migration 0002, Phase 7A) records the levels the step covers; required_level is the highest |
 
 ### 5.5 Guards at decision time (spec 13.3)
 

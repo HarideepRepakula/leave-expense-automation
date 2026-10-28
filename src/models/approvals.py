@@ -41,6 +41,19 @@ def request_type_matches_fk() -> CheckConstraint:
     )
 
 
+_LEVEL_LIST = ", ".join(f"'{v}'" for v in values(ApprovalLevel))
+COVERED_LEVELS_CHECKS = {
+    "covered_levels_is_array": "jsonb_typeof(covered_levels) = 'array' AND jsonb_array_length(covered_levels) >= 1",
+    "covered_levels_include_required": "covered_levels @> jsonb_build_array(required_level)",
+    "covered_levels_enum": "covered_levels <@ jsonb_build_array(" + _LEVEL_LIST + ")",
+}
+
+
+def covered_levels_checks() -> list[CheckConstraint]:
+    """approval_step.covered_levels (migration 0002): a non-empty array of levels that includes required_level."""
+    return [CheckConstraint(sql, name=name) for name, sql in COVERED_LEVELS_CHECKS.items()]
+
+
 def leave_request_fk():
     return mapped_column(ForeignKey(ops_fk("leave_request", "leave_request_id")))
 
@@ -60,6 +73,9 @@ class ApprovalStep(Base):
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)  # continues across rounds (AM-A5)
     approval_rule_id: Mapped[str] = mapped_column(ForeignKey(ops_fk("approval_rule", "approval_rule_id")), nullable=False)
     required_level: Mapped[str] = mapped_column(Text, nullable=False)
+    # Every level this one step covers, in level order; required_level is the highest (ASM-030, AMB-P3-03).
+    # Added by migration 0002 (Phase 7A).
+    covered_levels: Mapped[list] = mapped_column(JSONB, nullable=False)
     approver_employee_id: Mapped[str | None] = mapped_column(ForeignKey(ops_fk("employee", "employee_id")))
     delegated_from_employee_id: Mapped[str | None] = mapped_column(ForeignKey(ops_fk("employee", "employee_id")))
     step_status: Mapped[str] = mapped_column(Text, nullable=False, default=StepStatus.PENDING.value)
@@ -76,6 +92,7 @@ class ApprovalStep(Base):
         exactly_one_request_fk(),
         request_type_matches_fk(),
         CheckConstraint("submission_round >= 1 AND sequence_no >= 1", name="positive_counters"),
+        *covered_levels_checks(),
         CheckConstraint(
             "decision_at IS NULL OR (assigned_at IS NOT NULL AND decision_at >= assigned_at)",
             name="decision_after_assignment",

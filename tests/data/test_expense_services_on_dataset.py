@@ -1,6 +1,7 @@
-"""Phase 6 expense services on the generated dataset, at both scales (no database):
-- the services agree with the independent oracle on every claim; the only differences are Phase 7 routing codes,
-  exactly on the planted S19-E claims (ROUTING_PHASE7);
+"""Expense services on the generated dataset, at both scales (no database):
+- the services (with routing, Phase 7A) agree with the independent oracle on every claim, including the rule, the
+  route and the approval steps; ROUTING_PHASE7 is 0 and exactly the planted S19-E claims escalate with
+  NO_VALID_APPROVAL_PATH; every claim in PENDING_APPROVAL has its steps;
 - expense detections equal the expense labels expected DETECT (planted and natural), apart from S19-E;
 - every line carries quantity x unit amount = line amount (ASM-P6-02, V-ARITH-03).
 """
@@ -19,8 +20,11 @@ def test_services_agree_with_the_oracle_on_every_claim(gen):
     comp = compare(g.dataset, ROOT / "config")
     assert len(comp.rows) == vol["expense_claims"]
     assert comp.summary.get("DISAGREE", 0) == 0, comp.disagreements
-    routing = {r["record_id"] for r in comp.rows if r["result"] == "ROUTING_PHASE7"}
-    assert routing == {r["affected_record_id"] for r in g.truth.tables["anomaly_label"] if r["scenario_id"] == "S19-E"}
+    assert comp.summary.get("ROUTING_PHASE7", 0) == 0
+    no_path = {r["record_id"] for r in comp.rows if "NO_VALID_APPROVAL_PATH" in r["actual_codes"].split("|")}
+    assert no_path == {r["affected_record_id"] for r in g.truth.tables["anomaly_label"] if r["scenario_id"] == "S19-E"}
+    pending = [r for r in comp.rows if r["actual_status"] == "PENDING_APPROVAL"]
+    assert pending and all(int(r["steps"]) >= 1 and r["actual_route"] for r in pending)
 
 
 def test_expense_detections_equal_the_expense_labels(gen):

@@ -9,20 +9,25 @@ submit_expense() moves a DRAFT through SUBMITTED and VALIDATING to its outcome o
 below; PostgreSQL in src/repositories/expense_repository.py). At submission a budget RESERVATION of the claim total
 is posted (BR-BUD-02) and released at once when the outcome is REJECTED or RETURNED_FOR_CORRECTION (BR-BUD-04).
 
-Not here, by phase: routing, NO_VALID_APPROVAL_PATH and RULE_CONFLICT (Phase 7), so a clean claim ends in
-PENDING_APPROVAL without steps; approved_amount is computed (BR-EX-14) but stored only on approval (Phase 7);
-reimbursement (Phase 8); audit_event rows and idempotency records (Phase 8).
+Routing (Phase 7A, approval_routing): when the store has a router and validation neither rejects nor returns, the
+claim is routed on its primary category and USD total as of the submission date; NO_VALID_APPROVAL_PATH /
+RULE_CONFLICT join the codes (SOFT -> ESCALATED_FOR_REVIEW, the reservation is kept). Approval steps are created only
+for an outcome of PENDING_APPROVAL. A store without a router (the generator guard) does no routing, as in Phase 6.
+
+Not here, by phase: decisions and resubmission (Phase 7B); approved_amount is computed (BR-EX-14) but stored only
+on approval (Phase 7B); reimbursement (Phase 8); audit_event rows and idempotency records (Phase 8).
 """
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
-from src.common.enums import BudgetTxnType, LineValidationResult, ReceiptStatus, WorkflowStatus
+from src.common.enums import BudgetTxnType, LineValidationResult, ReceiptStatus, RequestType, WorkflowStatus
 from src.common.money import fx_rate_on
+from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
 from src.services.exception_service import Classification, ExceptionCatalogue, Finding, FindingSet
 from src.services.lifecycle import IllegalTransition, check_transition
 
@@ -291,16 +296,31 @@ class ExpenseSubmissionResult:
     classification: Classification
     events: list[dict]
     budget_postings: list[dict]     # RESERVATION (+ RELEASE when rejected/returned), unnumbered
+    routing: Routing | None = None  # None when not routed (rejected/returned, or a store without a router)
+    steps: list[dict] = field(default_factory=list)   # approval_step rows (PENDING_APPROVAL only)
 
     @property
     def status(self) -> str:
         return self.classification.status_after_validation
+
+    @property
+    def findings(self) -> list[Finding]:
+        """Validation findings, then the routing finding (one request_exception row each)."""
+        return self.validation.findings + (self.routing.findings if self.routing else [])
+
+    @property
+    def codes(self) -> list[str]:
+        return [f.code for f in self.findings]
 
 
 class ExpenseStore(Protocol):
     def load_claim(self, claim_id: str) -> dict: ...
 
     def context(self, claim: dict, on: date) -> ExpenseContext: ...
+
+    def router(self) -> ApprovalRouter | None: ...
+
+    def next_step_sequence(self, claim_id: str) -> int: ...
 
     def record_submission(self, result: ExpenseSubmissionResult) -> None: ...
 
@@ -329,7 +349,12 @@ def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatal
                                 f"Phase 7")
     ctx = store.context(claim, at.date())
     v = validate_claim(claim, ctx, at)
-    c = catalogue.classify(v.codes)
+    router = store.router()
+    routing = None
+    if router is not None and not catalogue.rejects_or_returns(v.codes):
+        routing = router.route(RequestType.EXPENSE.value, claim["employee_id"], v.primary_category, v.usd, at.date())
+    codes = v.codes + [f.code for f in (routing.findings if routing else [])]
+    c = catalogue.classify(codes)
     path = [WorkflowStatus.DRAFT.value, WorkflowStatus.SUBMITTED.value, WorkflowStatus.VALIDATING.value,
             c.status_after_validation]
     events = []
@@ -339,21 +364,26 @@ def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatal
         events.append({"previous_status": prev, "new_status": new, "occurred_at": at,
                        "actor_id": actor_id if new == WorkflowStatus.SUBMITTED.value else None,
                        "reason_code": c.decision_reason_code if last else None,
-                       "calculated_values": calculated_values(v, c) if last else None})
+                       "calculated_values": calculated_values(v, c, codes, routing) if last else None})
+    steps = []
+    if routing is not None and c.status_after_validation == WorkflowStatus.PENDING_APPROVAL.value:
+        steps = build_steps(RequestType.EXPENSE.value, claim_id, claim["current_round"], routing, at,
+                            store.next_step_sequence(claim_id))
     result = ExpenseSubmissionResult(claim_id, claim["current_round"], at, actor_id, correlation_id, v, c, events,
-                                     budget_postings(claim, v, ctx.budget, c.status_after_validation))
+                                     budget_postings(claim, v, ctx.budget, c.status_after_validation), routing, steps)
     store.record_submission(result)
     return result
 
 
-def calculated_values(v: ExpenseValidation, c: Classification) -> dict:
+def calculated_values(v: ExpenseValidation, c: Classification, codes: list[str], routing: Routing | None) -> dict:
     """Derived values on the outcome event (docs/06 7.1); decimals as text so the JSON is exact."""
     return {"total_amount": str(v.total), "amount_usd": str(v.usd), "fx_rate_used": str(v.rate),
             "primary_category": v.primary_category, "expense_policy_id": v.policy_id,
             "approved_amount_if_approved": str(v.approved_amount), "receipt_status": v.receipt_status,
             "lines": {r.expense_line_id: r.validation_result for r in v.lines},
             "budget": None if v.budget is None else {k: str(x) for k, x in v.budget.items()},
-            "exception_codes": v.codes, "exception_class": c.exception_class}
+            "exception_codes": codes, "exception_class": c.exception_class,
+            **(routing.as_values() if routing else {})}
 
 
 def apply_to_claim(claim: dict, lines: list[dict], result: ExpenseSubmissionResult) -> None:
@@ -377,8 +407,9 @@ class InMemoryExpenseStore:
     """An ExpenseStore over plain rows (generator guard, replay, unit tests). Same contract as the DB store."""
 
     def __init__(self, employees: dict[str, dict], policies: list[dict], fx: list[dict], cost_centers: list[dict],
-                 budgets: list[dict], receipts: list[dict], budget_ledger: list[dict], params: DetectionParams) -> None:
-        self.employees, self.policies, self.fx, self.params = employees, policies, fx, params
+                 budgets: list[dict], receipts: list[dict], budget_ledger: list[dict], params: DetectionParams,
+                 router: ApprovalRouter | None = None) -> None:
+        self.employees, self.policies, self.fx, self.params, self._router = employees, policies, fx, params, router
         self.cost_centers = {c["cost_center_id"]: c for c in cost_centers}
         self.budgets = budgets
         self.receipts = {r["receipt_id"]: r for r in receipts}
@@ -390,6 +421,14 @@ class InMemoryExpenseStore:
         self.results: dict[str, ExpenseSubmissionResult] = {}
         self.status_events: list[dict] = []
         self.exceptions: list[dict] = []
+        self.steps: dict[str, list[dict]] = {}
+        self.approval_events: list[dict] = []
+
+    def router(self) -> ApprovalRouter | None:
+        return self._router
+
+    def next_step_sequence(self, claim_id: str) -> int:
+        return len(self.steps.get(claim_id, [])) + 1
 
     def add_claim(self, row: dict, lines: list[dict], status: str | None = None) -> dict:
         c = dict(row)
@@ -444,7 +483,10 @@ class InMemoryExpenseStore:
         for e in result.events:
             self.status_events.append({"request_id": cid, "submission_round": result.submission_round,
                                        "correlation_id": result.correlation_id, **e})
-        for f in result.validation.findings:
+        for f in result.findings:
             self.exceptions.append({"request_id": cid, "submission_round": result.submission_round,
                                     "exception_code": f.code, "detail": f.detail, "detected_at": result.submitted_at,
                                     "detected_by": "SUBMISSION", "correlation_id": result.correlation_id})
+        if result.steps:
+            self.steps.setdefault(cid, []).extend(result.steps)
+            self.approval_events.append(assignment_event(result.steps[0], result.correlation_id))

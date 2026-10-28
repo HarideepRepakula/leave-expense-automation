@@ -14,7 +14,7 @@ import yaml
 from src.repositories.expense_repository import SqlExpenseStore
 from src.services.exception_service import ExceptionCatalogue
 from src.services.expense_service import DetectionParams, submit_expense
-from tests.conftest import ROOT, T0
+from tests.conftest import ROOT, T0, insert_configured_rules
 
 pytestmark = pytest.mark.db
 
@@ -33,6 +33,7 @@ def world(conn, tables, seed):
         {"exception_code": c["code"], "exception_class": c["class"], "severity": c["severity"],
          "default_route": ROUTE[c["severity"]], "requester_message_template": c["requester"],
          "analyst_message_template": c["analyst"]} for c in CODES["codes"] if c["code"] not in have])
+    insert_configured_rules(conn, t)
     conn.execute(sa.insert(t["ops.fx_rate"]).values(fx_rate_id="FX-USD-INR-20250101", from_currency="USD",
                                                      to_currency="INR", rate=Decimal("84.5"),
                                                      effective_from=date(2025, 1, 1)))

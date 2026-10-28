@@ -360,3 +360,34 @@ Original proposals:
 | AMB-P6-03 | How to give every line a quantity without changing amounts. | ASM-P6-02 (divisors of the amount; quantity 1 when none fits after an S5 edit). |
 | AMB-P6-04 | DEC-01 for S5 expense edits: the S5 constructions keep their own helpers (lines_fit, split_safe); every result is then checked by the oracle (DEC-P4-02) and by the services-vs-oracle comparison (0 disagreements, tested). Rebuilding each S5 edit guard on the services, as done for leave, would change the expense dataset. | Keep the S5 expense helpers; S4 uses the services. |
 | AMB-P6-05 | Cross-claim checks against earlier claims of any outcome, or only claims still holding. | Any outcome (ASM-P6-06), same as the oracle. |
+
+## 11. Phase 7A additions (routing and approval steps), awaiting approval
+
+### 11.1 Assumptions (ASSUMPTION, illustrative synthetic)
+
+| ID | Assumption |
+|---|---|
+| ASM-P7A-01 | Routing inputs: the routing date is the submission date; the measure is the leave request's whole requested_quantity (all leave years together) or the claim's USD total; the category is the leave type or the claim's primary (highest-amount) category. Same as the oracle. |
+| ASM-P7A-02 | Delegation: of several delegations of one approver covering the routing date, the lowest delegation_id is used. A delegate who cannot act is substituted in turn (chain); delegated_from records the first person replaced by a delegate. |
+| ASM-P7A-03 | L4 needs exactly one finance controller in the requester's country and L5 exactly one G7 (AMB-P7A-01); two candidates for one role leave the level unresolved (AM-B9: never pick one). |
+
+### 11.2 Decisions
+
+| ID | Decision | Alternatives considered |
+|---|---|---|
+| DEC-P7A-01 | Routing lives in src/services/approval_routing.py (pure; reads approval_rule rows, no src/reference import). Submission routes when the store supplies a router and validation neither rejects nor returns; the routing code joins the codes and the classification. Both PostgreSQL stores always route (rules, employees, departments, delegations read in the same transaction). In-memory stores route only when given a router, so the generator guards behave exactly as in Phases 5-6 and the dataset is unchanged. | Route in every store (would change generator guard behaviour). |
+| DEC-P7A-02 | Migration 0001 builds tables from the current models (DEC-30), so it now drops columns that a later revision adds (LATER_COLUMNS) right after create_all. 0001 is therefore exactly the 0001 schema and 0002 can be downgraded and upgraded on its own (tested). | Rewrite 0001 as frozen explicit DDL (large change to an approved migration). |
+| DEC-P7A-03 | Oracle (owner decision on AMB-P6-01): an expense claim keeps its budget reservation unless validation rejects or returns it (a HARD or CORRECTABLE submission code). Measured effect on the dataset: none (ground truth byte-identical); a hand-built oracle test shows the difference. | |
+| DEC-P7A-04 | data/validation/detections.csv stays validation findings plus batch detectors; routing codes are not detections. They are recorded as request_exception rows (DB), in the replay's codes() and in both comparisons. Keeps the dataset byte-identical. | Add routing codes to detections.csv (changes the file and the fingerprint). |
+| DEC-P7A-05 | Both comparisons compare all codes (routing included), the status after validation and routing, the rule id, the route (level, approver, covered levels, delegated_from) and the steps (exactly the route, in order, only step 1 assigned, when PENDING_APPROVAL; none otherwise). ROUTING_PHASE7 can no longer occur and is printed as 0. | |
+| DEC-P7A-06 | At submission the first step is assigned (assigned_at = submission time) and one approval_event ASSIGNED (actor NULL = system, id APE from id_sequence) is written; later steps stay unassigned until the previous one is approved (7B). | No approval_event until Phase 8. |
+| DEC-P7A-07 | Not in 7A: approve / reject / return with attempts, idempotency and history, resubmission, process-owner decisions, S6 timing, year-end CARRY_FORWARD rows, S19 and S22 data (all 7B). | |
+
+### 11.3 Ambiguities found in Phase 7A (default APPLIED; please confirm or change)
+
+| ID | Ambiguity | Default applied |
+|---|---|---|
+| AMB-P7A-01 | Owner decision S19 option (a): L5 = the G7 of the requester's country. The dataset keeps one G7 for all countries until 7B, so most countries have no G7 of their own. | When the requester's country has no G7 and the organisation has exactly one, that G7 is L5 (today's single-CFO model, ASM-014). Two G7s in one country -> unresolved. After the 7B dataset change every country has its own G7 and this fallback never applies. |
+| AMB-P7A-02 | Escalated requests (SOFT) are routed but have no steps yet. | The route is recorded in calculated_values; steps are created when the process owner sends the request on (7B). |
+| AMB-P7A-03 | A delegation whose delegate is the requester: substitution moves the requester up to the delegator, who was already visited. | Level unresolved -> NO_VALID_APPROVAL_PATH (same as the oracle). Alternative: continue with the delegator's manager (needs an oracle change too). |
+| AMB-P7A-04 | Writing approval_event ASSIGNED now (Phase 7A) or with the audit work (Phase 8). | Now, for step 1 only (DEC-P7A-06). |
