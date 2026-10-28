@@ -21,6 +21,10 @@
 | tests/data/test_leave_services_on_dataset.py (Phase 5) | no | full and starter scale: services agree with the oracle on every leave request (only ROUTING_PHASE7 differences, exactly the S19-L records); leave detections = planted leave labels; replay posts exactly the legacy USAGE; cross-year share 2.5-3.5 percent; scenarios_not_reached warning and manifest entry |
 | tests/db/test_leave_submission_db.py (Phase 5) | yes | PostgreSQL store: request update, three status events, exception rows, RSE/REX ids from id_sequence, row locks on leave_request and leave_balance |
 
+| tests/unit/test_expense_validation.py (Phase 6) | no | every expense code and its route, USD half-up rounding, line PASS/CAPPED/FAIL and approved amount, budget reservation and release, duplicate receipts, claim pattern, split windows and threshold, batch detectors, input errors, policy configuration error |
+| tests/data/test_expense_services_on_dataset.py (Phase 6) | no | full and starter scale: services agree with the oracle on every claim (only ROUTING_PHASE7, exactly S19-E); expense detections = expense labels; quantity x unit = amount on every line |
+| tests/db/test_expense_submission_db.py (Phase 6) | yes | PostgreSQL store: claim and line updates, status events, exception rows, CCT reservation and release with committed_amount, row locks on claim, cost center and budget |
+
 tests/data/test_generator_baseline.py (Phase 5 change): the Phase 3 test of the conservative balance guard is replaced
 by an independent check: the reference oracle finds no exception code on any baseline request.
 

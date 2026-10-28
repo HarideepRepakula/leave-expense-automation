@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
 Current phase: Phase 6 (Expense validation and expense claim services)
-Status: IN PROGRESS (started 2026-10-28 after "APPROVED PHASE 5").
+Status: COMPLETE AND VERIFIED 2026-10-28. Waiting for "APPROVED PHASE 6". Do not start Phase 7 before that.
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -19,6 +19,66 @@ Phase 4: APPROVED 2026-10-28. Owner re-ran validation, the reproducibility check
     (or were only partly generated). Scheduled as the first task of Phase 5.
 
 Phase 5: APPROVED 2026-10-28. AMB-P5-01..04 accepted as applied. The OneDrive copy is already deleted (item closed).
+
+## Phase 6 record
+
+Scope implemented (spec 13.2, 26 Phase 6; docs/05 sections 3, 4, 6, 7, 9; docs/06 8.1): expense line and claim
+validation BR-EX-01..13 (all codes recorded, highest severity decides), USD conversion with the fixed fx_rate rows
+(exact Decimal, half-up), policy resolution and per-category limits, receipt rules, duplicate receipts (self /
+cross-employee), duplicate claim pattern, split claims (SUSPICIOUS_PATTERN, "suspected split claim, requires
+investigation", never "fraud"), budget availability with RESERVATION / RELEASE postings, line PASS / CAPPED / FAIL,
+approved amount if approved; submission DRAFT -> SUBMITTED -> VALIDATING -> outcome in memory and in PostgreSQL
+(locks on claim, cost center, budget; status events, exception rows, budget ledger, committed_amount); batch
+detectors (duplicate receipts, split) into data/validation/detections.csv; services-vs-oracle comparison for all
+1,000 claims. Services import nothing from src/reference (independence test passes).
+Waits: routing and approvals (Phase 7), reimbursement, audit_event and idempotency (Phase 8), API and dashboard.
+Generator (DEC-01): S4 validity = the expense service on each drawn claim (draws unchanged); quantity x unit on
+every line from a new appended stream; set_line keeps them consistent. Leave files unchanged (verified).
+
+Files created: src/services/{expense_service,expense_batch}.py; src/repositories/{base,expense_repository}.py;
+src/evaluation/expense_service_vs_oracle.py; tests/unit/test_expense_validation.py;
+tests/data/test_expense_services_on_dataset.py; tests/db/test_expense_submission_db.py.
+Files changed: src/services/{exception_service,leave_request_service}.py (Finding/FindingSet shared);
+src/repositories/leave_repository.py (uses base.py); src/data/{generate,export}.py; src/data/stages/{expenses,
+workbench}.py; config/generation.yaml (stream expense_quantities, quantity_max); tests/data/test_leave_services_on_dataset.py
+(filter leave detections); tests/db/test_reimbursement_constraints.py (old unused import removed); docs/07 (section 14),
+docs/09 (section 9 approved, section 10: ASM-P6-01..07, DEC-P6-01..05, AMB-P6-01..05), docs/11, docs/15;
+pyproject.toml (0.6.0); data/manifest.json. No new packages.
+
+Commands:
+    python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+    python -m src.validation
+    python -m src.evaluation.expense_service_vs_oracle
+    python -m src.evaluation.leave_service_vs_oracle
+    .\scripts\reproducibility_check.ps1
+    pytest -q
+
+REAL results (2026-10-28):
+- Generate --load: exit 0; lea_dev counts = generated (expense_claim 1000, expense_line 3201, receipt 2927,
+  leave_request 800, leave_balance_transaction 13086); ground_truth schema 1800 / 1057 / 40 / 41.
+- Validation: 21 checks, 0 failed, 7 not applicable; V-ARITH-03 now runs: 3201/3201; M1 0/24924, M2 0/30350,
+  M3 6958/6958 = 1.0.
+- Expense services vs oracle (1000 claims: DRAFT 8, SUBMITTED 992): AGREE 996, ROUTING_PHASE7 4 (the planted S19-E
+  G7 claims; oracle final ESCALATED_FOR_REVIEW via NO_VALID_APPROVAL_PATH), DISAGREE 0. Leave unchanged: AGREE 796,
+  ROUTING_PHASE7 4, DISAGREE 0.
+- detections.csv: expense codes equal the expense labels expected DETECT (tested), e.g. SPLIT_CLAIM_SUSPECTED batch 24
+  (S09 18 + BC-10 4 + natural 2), BUDGET_EXCEEDED 9 (S21 8 + natural 1).
+- Fingerprint 0a84321bc8b848814688c55067befd6260d91ae149b603e27127626e2606ca2a (was 7dbe6672...). Against Phase 5:
+  47 of 54 files identical (every leave file, expense_claim, receipt, ground truth); changed: expense_line (csv, json),
+  seed.sql, detections.csv, validation_report (csv, json, md).
+- reproducibility_check.ps1: 54 files, 54 identical SHA-256, RESULT: REPRODUCIBLE, exit 0.
+- pytest -q: 384 passed in 34.84s (349 + 35 new). ruff --select F,E9 src tests: All checks passed.
+Debugging: test_leave_detections_equal_the_planted_leave_labels (full, starter) failed after detections.csv gained
+expense rows; root cause: the test compared all detections with leave labels; fix: filter record_type LEAVE.
+
+Open issues / for owner decision: AMB-P6-01..05 (docs/09 section 10.3). S19 still all on the G7 (Phase 7).
+JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
+
+Acceptance criteria after Phase 6: 1-8, 13, 17, 21 MET (8 now also with line quantity x unit, V-ARITH-03);
+12, 16, 18, 22 PARTIAL; 9, 10, 11, 14, 15, 19, 20 PARTIAL or NOT STARTED (Phases 7-10).
+
+Next phase: Phase 7 (approval engine and lifecycle management) after "APPROVED PHASE 6".
+
 
 ## Phase 5 record
 

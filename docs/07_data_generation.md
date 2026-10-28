@@ -306,3 +306,14 @@ with actual_count NULL and are built with Phases 7-8.
 | Services vs oracle | src/evaluation/leave_service_vs_oracle.py | every leave request compared; routing codes reported as ROUTING_PHASE7 (DEC-P5-05) |
 
 Stage S6 (outcomes written into the dataset), routing, approvals, USAGE at approval and year-end CARRY_FORWARD rows remain Phase 7.
+
+## 14. As implemented in Phase 6 (assumptions in docs/09 section 10)
+
+| Piece | Module | Notes |
+|---|---|---|
+| Expense services | src/services/expense_service.py | BR-EX-01..13, FX to USD, policy resolution, limits, receipts, duplicates, split, budget reservation and release, submission; in-memory store |
+| Detectors and replay | src/services/expense_batch.py | duplicate-receipt and split batch detectors; submission-order replay (ASM-P6-01) |
+| DB store | src/repositories/expense_repository.py (shared helpers in base.py) | locks claim, cost center and budget; status events, exception rows, budget ledger |
+| S4 guard | src/data/stages/expenses.py (ExpenseGuard) | the expense service must find no code on a drawn claim (DEC-P6-02) |
+| Quantities | expenses.line_quantity, workbench.set_line, stream expense_quantities | quantity x unit = amount on every line (ASM-P6-02) |
+| Services vs oracle | src/evaluation/expense_service_vs_oracle.py | all 1,000 claims; routing codes as ROUTING_PHASE7 |

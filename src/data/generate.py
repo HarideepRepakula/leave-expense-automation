@@ -35,6 +35,8 @@ from src.data.stages.master import build_master
 from src.data.stages.workbench import Workbench
 from src.services.calendar_service import HolidayCalendar
 from src.services.exception_service import ExceptionCatalogue
+from src.services.expense_batch import replay_expense
+from src.services.expense_service import DetectionParams
 from src.services.leave_batch import replay_leave
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -49,7 +51,7 @@ class Generation:
     meta: dict
     truth: GroundTruth | None
     config_dir: Path
-    detections: list = field(default_factory=list)   # leave service findings (Phase 5), see leave_detections()
+    detections: list = field(default_factory=list)   # service findings (Phases 5-6), see service_detections()
 
 
 def build(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
@@ -81,7 +83,7 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         dataset["leave_balance_transaction"], dataset["leave_balance"])
     dataset.update(build_expense_claims(                                                         # S4
         cfg, p, streams, dataset["employee"], dataset["employee_cost_center_assignment"],
-        dataset["expense_policy"], dataset["fx_rate"]))
+        dataset["expense_policy"], dataset["fx_rate"], dataset["cost_center"], dataset["cost_center_budget"]))
     stages = ["S1 master", "S2 balances (opening + accrual)", "S3 leave", "S4 expenses"]
 
     truth, detections = None, []
@@ -94,14 +96,14 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         truth = build_ground_truth(cfg, p, dataset, wb.plants, wb.boundaries, leave_map, claim_map,  # S9
                                    config_dir, FIXTURES_DIR)
         stages += ["S5 anomalies + boundaries (in place)", "S9 ground truth (planted definitions + reference oracle)"]
-        detections = leave_detections(cfg, dataset, calendar)
-        stages.append("leave services replay -> validation/detections.csv (Phase 5)")
+        detections = service_detections(cfg, dataset, calendar)
+        stages.append("leave and expense services replay -> validation/detections.csv (Phases 5-6)")
 
     missing = [t for t in TABLE_ORDER if t not in dataset]
     if missing:
         raise RuntimeError(f"stages did not produce: {missing}")
     meta = {
-        "phase": 3 if baseline_only else 5,
+        "phase": 3 if baseline_only else 6,
         "stages": stages,
         "seed": p.seed,
         "parameters": {"employees": p.employees, "leave_requests": p.leave_requests,
@@ -115,16 +117,17 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
     return Generation(dataset, credentials, meta, truth, config_dir, detections)
 
 
-def leave_detections(cfg: dict, dataset: Dataset, calendar: HolidayCalendar) -> list:
-    """System detections for leave (docs/08: request_exception codes plus batch detectors). Until the Phase 7
-    engine runs S6, the codes come from replaying every submitted request through the Phase 5 services in
-    submission order (src/services/leave_batch.py); the dataset itself is not changed (AMB-P3-01)."""
-    replay = replay_leave(dataset["leave_request"], {e["employee_id"]: e for e in dataset["employee"]},
-                          {x["leave_policy_id"]: x for x in dataset["leave_policy"]}, calendar,
-                          dataset["leave_balance_transaction"], dataset["leave_balance"],
-                          ExceptionCatalogue.from_config(cfg["exception_codes"]))
-    return sorted(replay.submission_detections() + replay.detections,
-                  key=lambda d: (d.record_type, d.record_id, d.exception_code, d.detected_by))
+def service_detections(cfg: dict, dataset: Dataset, calendar: HolidayCalendar) -> list:
+    """System detections (docs/08: request_exception codes plus batch detectors). Until the Phase 7 engine runs
+    S6, the codes come from replaying every submitted request through the leave (Phase 5) and expense (Phase 6)
+    services in submission order; the dataset itself is not changed (AMB-P3-01)."""
+    catalogue = ExceptionCatalogue.from_config(cfg["exception_codes"])
+    leave = replay_leave(dataset["leave_request"], {e["employee_id"]: e for e in dataset["employee"]},
+                         {x["leave_policy_id"]: x for x in dataset["leave_policy"]}, calendar,
+                         dataset["leave_balance_transaction"], dataset["leave_balance"], catalogue)
+    expense = replay_expense(dataset, catalogue, DetectionParams.from_config(cfg["expense_policies"]))
+    found = leave.submission_detections() + leave.detections + expense.submission_detections() + expense.detections
+    return sorted(found, key=lambda d: (d.record_type, d.record_id, d.exception_code, d.detected_by))
 
 
 def scenario_shortfalls(scenarios: list[dict]) -> list[dict]:

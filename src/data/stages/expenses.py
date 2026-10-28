@@ -6,10 +6,12 @@ Calculated: local amounts (FX on the submission date, ASM-031), claim total = SU
 period, country and currency (DEC-14), cost center from the assignment on the earliest line date (DEC-13),
 receipt hash (ASM-020), receipt_status.
 
-Valid baseline (CF-06): every line is within its per-line limit, the total within the per-claim limit, lines
-within employment and at most 90 days before submission, a receipt on every line at or above the threshold,
-one currency, unique receipt hashes. Policy ids, FX and USD totals on the claim stay NULL and lines stay
-PENDING until the Phase 6 services validate them in stage S6 (AMB-P3-01).
+Valid baseline (CF-06): since Phase 6 a drawn claim is kept only when the expense service (validate_claim,
+DEC-01) finds no exception code on it: lines within limits, employment and the 90-day window, receipts at or
+above the threshold, one currency, an active cost center. Cross-claim patterns (split, duplicates, budget) are
+judged later by the replay; receipt hashes are unique by construction. Quantity and unit amount come from their
+own stream (ASM-P6-02). Policy ids, FX and USD totals on the claim stay NULL and lines stay PENDING until the
+Phase 7 engine runs stage S6 (AMB-P3-01).
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ from src.common.money import fx_rate_on, money
 from src.common.rng import RngStreams
 from src.data.sampling import pick, timestamp_on, weighted_date, weighted_pick
 from src.data.stages import GenParams
+from src.services.expense_service import DetectionParams, ExpenseContext, validate_claim
 from src.services.policy_resolver import resolve_version
 
 
@@ -42,8 +45,44 @@ def assignment_on(assignments: list[dict], on: date) -> str | None:
     return None
 
 
+class ExpenseGuard:
+    """DEC-01: a drawn claim is valid when the expense service finds no code on it. It is checked alone (no other
+    claims, empty budget ledger): split, duplicate and budget patterns are judged by the replay."""
+
+    def __init__(self, cfg: dict, policies: list[dict], fx: list[dict], cost_centers: list[dict],
+                 budgets: list[dict], assignments: dict[str, list[dict]]) -> None:
+        self.policies, self.fx, self.assignments = policies, fx, assignments
+        self.ccs = {c["cost_center_id"]: c for c in cost_centers}
+        self.budgets = budgets
+        self.params = DetectionParams.from_config(cfg["expense_policies"])
+
+    def ok(self, emp: dict, ts, currency: str, lines: list[dict]) -> bool:
+        cc_id = assignment_on(self.assignments[emp["employee_id"]], min(ln["expense_date"] for ln in lines))
+        claim = {"expense_claim_id": "DRAW", "employee_id": emp["employee_id"], "currency": currency,
+                 "total_amount": money(sum(ln["amount"] for ln in lines)), "expense_policy_id": None,
+                 "cost_center_id": cc_id, "current_round": 1}
+        rows = [{"expense_line_id": f"DRAW-{i:02d}", "line_number": i, "submission_round": 1,
+                 "category": ln["category"], "expense_date": ln["expense_date"], "quantity": None,
+                 "unit_amount": None, "line_amount": ln["amount"], "currency": currency,
+                 "receipt_id": f"DRAW-R{i:02d}" if ln["has_receipt"] else None}
+                for i, ln in enumerate(lines, start=1)]
+        budget = next((b for b in self.budgets if b["cost_center_id"] == cc_id
+                       and b["budget_period_start"] <= ts.date() <= b["budget_period_end"]), None)
+        ctx = ExpenseContext(emp, rows, {}, self.policies, self.fx, self.ccs.get(cc_id), budget, [], [], self.params)
+        return not validate_claim(claim, ctx, ts).findings
+
+
+def line_quantity(rng: np.random.Generator, amount: Decimal, q_max: int) -> tuple[Decimal, Decimal]:
+    """ASM-P6-02: a quantity in 1..q_max that divides the amount in cents exactly; unit = amount / quantity."""
+    cents = int(amount * 100)
+    options = [q for q in range(1, q_max + 1) if cents % q == 0]
+    q = options[int(rng.integers(0, len(options)))]
+    return Decimal(q).quantize(Decimal("0.01")), money(amount / q)
+
+
 def build_expense_claims(cfg: dict, p: GenParams, streams: RngStreams, employees: list[dict],
-                         assignments: list[dict], policies: list[dict], fx: list[dict]) -> dict[str, list[dict]]:
+                         assignments: list[dict], policies: list[dict], fx: list[dict], cost_centers: list[dict],
+                         budgets: list[dict]) -> dict[str, list[dict]]:
     xcfg = cfg["generation"]["expenses"]
     tcfg = cfg["generation"]["timeline"]
     rng = streams.get("expenses")
@@ -58,11 +97,13 @@ def build_expense_claims(cfg: dict, p: GenParams, streams: RngStreams, employees
     assignments_by_emp: dict[str, list[dict]] = {}
     for a in assignments:
         assignments_by_emp.setdefault(a["employee_id"], []).append(a)
+    guard = ExpenseGuard(cfg, policies, fx, cost_centers, budgets, assignments_by_emp)
+    q_rng = streams.get("expense_quantities")
 
     accepted = []
     for c in range(p.expense_claims):
         for _ in range(xcfg["max_attempts_per_claim"]):
-            claim = _draw(rng, fakers, xcfg, tcfg, p, eligible, policies, fx, last_submit)
+            claim = _draw(rng, fakers, xcfg, tcfg, p, eligible, policies, fx, last_submit, guard)
             if claim is not None:
                 break
         else:
@@ -97,6 +138,7 @@ def build_expense_claims(cfg: dict, p: GenParams, streams: RngStreams, employees
                     "currency": claim["currency"],
                     "created_at": claim["ts"],
                 })
+            quantity, unit = line_quantity(q_rng, ln["amount"], int(xcfg["quantity_max"][ln["category"]]))
             lines.append({
                 "expense_line_id": ids.expense_line_id(claim_id, line_number),
                 "expense_claim_id": claim_id,
@@ -105,8 +147,8 @@ def build_expense_claims(cfg: dict, p: GenParams, streams: RngStreams, employees
                 "category": ln["category"],
                 "merchant_description": f"{ln['label']} - {ln['merchant']}",
                 "expense_date": ln["expense_date"],
-                "quantity": None,
-                "unit_amount": None,
+                "quantity": quantity,
+                "unit_amount": unit,
                 "line_amount": ln["amount"],
                 "currency": claim["currency"],
                 "receipt_id": rid,
@@ -146,7 +188,7 @@ def build_expense_claims(cfg: dict, p: GenParams, streams: RngStreams, employees
 
 
 def _draw(rng: np.random.Generator, fakers: dict, xcfg: dict, tcfg: dict, p: GenParams, eligible: list[dict],
-          policies: list[dict], fx: list[dict], last_submit: date) -> dict | None:
+          policies: list[dict], fx: list[dict], last_submit: date, guard: ExpenseGuard) -> dict | None:
     emp = pick(rng, eligible)
     country = emp["country"]
     currency = emp["currency"]
@@ -187,17 +229,14 @@ def _draw(rng: np.random.Generator, fakers: dict, xcfg: dict, tcfg: dict, p: Gen
             "receipt_draw": rng.random(),
         })
 
-    # Validity guards against the policy version effective on the submission date (BR-POL-01).
+    # Receipt presence is a raw input: required at or above the threshold of the version effective on the
+    # submission date (BR-POL-01), otherwise drawn. Validity is then the expense service's verdict (DEC-01).
     receipt_required = False
     for ln in lines:
         pol = resolve_version(policies, f"XPOL-{ln['category']}-{country}", sub_date)
-        if ln["amount"] > pol["per_line_limit"]:
-            return None
         needs = ln["amount"] >= pol["receipt_threshold"]
         receipt_required |= needs
         ln["has_receipt"] = needs or ln["receipt_draw"] < xcfg["receipt_below_threshold_share"]
-    top = max(lines, key=lambda ln: ln["amount"])  # primary category = highest-amount line (BR-EX-03)
-    claim_limit = resolve_version(policies, f"XPOL-{top['category']}-{country}", sub_date)["per_claim_limit"]
-    if sum(ln["amount"] for ln in lines) > claim_limit:
+    if not guard.ok(emp, ts, currency, lines):
         return None
     return {"emp": emp, "ts": ts, "currency": currency, "lines": lines, "receipt_required": receipt_required}

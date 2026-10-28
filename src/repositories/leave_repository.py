@@ -5,23 +5,18 @@ the store never commits (the caller commits or rolls back). Locks, in this order
 employee's leave_balance rows on the request's policy, both FOR UPDATE, before the ledger is read, so two
 submissions of the same employee cannot both spend the same balance. No business rule lives here.
 
-IDs for request_status_event (RSE) and request_exception (REX) come from ops.id_sequence (DEC-32). A missing scope
-row is created from the highest id already in the table, so ids continue after a loaded dataset.
+IDs for request_status_event (RSE) and request_exception (REX) come from ops.id_sequence (DEC-32, base.py).
 Not yet: idempotency_record and audit_event rows (Phase 8), approval steps (Phase 7).
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.common.enums import DetectedBy, RequestType, WorkflowStatus
-from src.models import Base
+from src.common.enums import RequestType, WorkflowStatus
+from src.repositories.base import table as _t
+from src.repositories.base import write_events_and_exceptions
 from src.services.calendar_service import HolidayCalendar
 from src.services.leave_request_service import LeaveContext, SubmissionResult
-
-
-def _t(name: str) -> sa.Table:
-    return Base.metadata.tables[f"ops.{name}"]
 
 
 class SqlLeaveStore:
@@ -57,21 +52,6 @@ class SqlLeaveStore:
         return LeaveContext(emp, policies[r["leave_policy_id"]], calendar, others, policies, ledger,
                             {b["leave_year"] for b in balances})
 
-    def _allocate(self, table: str, prefix: str, n: int) -> list[str]:
-        """n consecutive ids <PREFIX>-000000001 from id_sequence, locked FOR UPDATE (DEC-32)."""
-        if n == 0:
-            return []
-        seq, tbl = _t("id_sequence"), _t(table)
-        pk = list(tbl.primary_key.columns)[0]
-        highest = sa.select(sa.func.coalesce(sa.func.max(sa.cast(sa.func.substr(pk, len(prefix) + 2),
-                                                                  sa.Integer)), 0) + 1).scalar_subquery()
-        self.conn.execute(pg_insert(seq).values(sequence_scope=prefix, next_value=highest)
-                          .on_conflict_do_nothing(index_elements=["sequence_scope"]))
-        first = self.conn.execute(sa.select(seq.c.next_value).where(seq.c.sequence_scope == prefix)
-                                  .with_for_update()).scalar_one()
-        self.conn.execute(sa.update(seq).where(seq.c.sequence_scope == prefix).values(next_value=first + n))
-        return [f"{prefix}-{i:09d}" for i in range(first, first + n)]
-
     def record_submission(self, result: SubmissionResult) -> None:
         v, c = result.validation, result.classification
         lr = _t("leave_request")
@@ -82,12 +62,4 @@ class SqlLeaveStore:
         common = {"request_type": RequestType.LEAVE.value, "leave_request_id": result.request_id,
                   "expense_claim_id": None, "submission_round": result.submission_round,
                   "correlation_id": result.correlation_id}
-        events = [{**common, "event_id": eid, **e}
-                  for eid, e in zip(self._allocate("request_status_event", "RSE", len(result.events)), result.events)]
-        self.conn.execute(sa.insert(_t("request_status_event")), events)
-        if v.findings:
-            rex = self._allocate("request_exception", "REX", len(v.findings))
-            self.conn.execute(sa.insert(_t("request_exception")), [
-                {**common, "exception_id": xid, "exception_code": f.code, "detail": f.detail,
-                 "detected_at": result.submitted_at, "detected_by": DetectedBy.SUBMISSION.value}
-                for xid, f in zip(rex, v.findings)])
+        write_events_and_exceptions(self.conn, common, result.events, v.findings, result.submitted_at)

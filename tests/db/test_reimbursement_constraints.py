@@ -1,5 +1,5 @@
 """Acceptance criteria 14 and 15: reimbursements only for approved claims; duplicates prevented (R-7.11, AM-F5)."""
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest

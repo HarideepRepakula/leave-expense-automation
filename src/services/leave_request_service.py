@@ -13,7 +13,7 @@ request ends in PENDING_APPROVAL without steps; resubmission (Phase 7); audit_ev
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
@@ -25,7 +25,7 @@ from src.services.calendar_service import (
     quantity_by_year,
     requested_quantity,
 )
-from src.services.exception_service import Classification, ExceptionCatalogue
+from src.services.exception_service import Classification, ExceptionCatalogue, Finding, FindingSet
 from src.services.leave_balance_service import BalanceBook, Reservation, negative_floor
 from src.services.lifecycle import IllegalTransition, check_transition
 
@@ -70,13 +70,6 @@ def leave_parts(calendar: HolidayCalendar, r: dict, country: str) -> dict[int, D
 
 
 @dataclass
-class Finding:
-    code: str
-    detail: str
-    other_request_ids: list[str] = field(default_factory=list)
-
-
-@dataclass
 class LeaveValidation:
     request_id: str
     submitted_on: date
@@ -103,19 +96,6 @@ class LeaveContext:
     balance_years: set[int]
 
 
-class _Findings:
-    """One Finding per code, in the order the checks run; overlap findings collect every other request id."""
-
-    def __init__(self) -> None:
-        self.items: dict[str, Finding] = {}
-
-    def add(self, code: str, detail: str, other: str | None = None) -> None:
-        f = self.items.setdefault(code, Finding(code, detail))
-        if other is not None and other not in f.other_request_ids:
-            f.other_request_ids.append(other)
-            f.detail = f"{detail}: {', '.join(f.other_request_ids)}"
-
-
 def reservations(ctx: LeaveContext, policy_id: str) -> list[Reservation]:
     """BR-LBAL-07: open requests of the same employee and policy reserve their per-year parts."""
     country = ctx.employee["country"]
@@ -131,7 +111,7 @@ def validate_leave(r: dict, ctx: LeaveContext, submitted_at: datetime) -> LeaveV
     emp, pol, cal = ctx.employee, ctx.policy, ctx.calendar
     country = emp["country"]
     rid = r["leave_request_id"]
-    out = _Findings()
+    out = FindingSet()
 
     # BR-LV-01/02: employed on the submission date and on every leave date.
     start_emp, end_emp = emp["employment_start"], emp["employment_end"]

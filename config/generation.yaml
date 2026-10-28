@@ -11,7 +11,7 @@ master_load_timestamp: "2024-12-31T00:00:00Z"   # created_at of master rows (doc
 # Phase 4: `anomalies` / `boundaries` drive LEAVE edits; `anomalies_expense` / `boundaries_expense` drive EXPENSE
 # edits, so changing one request volume never reshuffles the other's planted records (AM-A8, CF-10).
 streams: [employees, cost_centers, balances, leave, expenses, anomalies, boundaries, delays, payments,
-          delegations, users, anomalies_expense, boundaries_expense]
+          delegations, users, anomalies_expense, boundaries_expense, expense_quantities]
 
 volumes:                              # CLI flags override employees / leave_requests / expense_claims
   employees: 400
@@ -118,6 +118,10 @@ expenses:
     TRAINING: [Course fee, Conference registration, Certification exam]
     CLIENT_ENTERTAINMENT: [Client dinner, Client lunch, Event tickets]
   max_attempts_per_claim: 500
+  # ASM-P6-02: quantity x unit amount on every line (V-ARITH-03). Quantity is drawn from the
+  # expense_quantities stream among 1..max that divide the line amount in cents exactly, so the line
+  # amount itself (drawn in Phase 3) never changes.
+  quantity_max: {TRAVEL: 3, MEALS: 4, ACCOMMODATION: 5, OFFICE_SUPPLIES: 10, TRAINING: 1, CLIENT_ENTERTAINMENT: 4}
 
 # Stage S5 (Phase 4): planted scenarios, controls and boundaries (docs/07 sections 7-8, ASM-027).
 # Counts are at the full reference volumes; other volumes scale them, minimum 1 (ASM-028).

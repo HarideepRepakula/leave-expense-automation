@@ -326,3 +326,37 @@ Original proposals:
 | AMB-P5-02 | BR-LBAL-09 says carry-forward is unknown until 31 December, but not how to treat it after 1 January when the year-end CARRY_FORWARD posting does not exist yet (Phase 7). | Recompute it from the previous year's ledger minus still-open reservations (ASM-P5-03). The services then agree with the oracle (ASM-P4-12) on every leave record of the dataset. Alternatives: count no carry-forward until it is posted (stricter); ignore open reservations (more lenient). |
 | AMB-P5-03 | AM-A4 says the negative-balance detector looks at "the ledger". In Phase 5 the only USAGE rows are legacy approvals; earlier requests still pending are not in the ledger yet. A ledger-only detector would miss S01 records whose balance was already reserved by earlier pending requests (the oracle and the S01 construction count them). | Count open reservations (ASM-P5-05). Alternative: posted ledger only (would disagree with the oracle on S01). |
 | AMB-P5-04 | docs/05 9.3 gives decision_reason_code only for REJECTED. | Also set for RETURNED_FOR_CORRECTION and ESCALATED_FOR_REVIEW (ASM-P5-08). |
+
+## 10. Phase 6 additions (expense validation and expense claim services), awaiting "APPROVED PHASE 6"
+
+### 10.1 Assumptions (ASSUMPTION, illustrative synthetic; values in config/*.yaml)
+
+| ID | Assumption |
+|---|---|
+| ASM-P6-01 | Replay rules for expense (src/services/expense_batch.py), used for detections.csv and the oracle comparison: DRAFT claims are invisible; every other claim is submitted as a DRAFT at its created_at instant, in submission order. Claims stay SUBMITTED in the dataset (AMB-P3-01). |
+| ASM-P6-02 | Every line carries quantity and unit_amount (V-ARITH-03). Quantity is a raw input drawn from the new, last stream expense_quantities among 1..quantity_max[category] (TRAVEL 3, MEALS 4, ACCOMMODATION 5, OFFICE_SUPPLIES 10, TRAINING 1, CLIENT_ENTERTAINMENT 4) that divide the line amount in cents exactly; unit_amount = amount / quantity, exact. When S5 changes a line amount, the quantity is kept if it still divides the new amount, else it becomes 1. Line amounts are never changed for this. |
+| ASM-P6-03 | USD amount = round half-up to 2 dp of local total / rate, with the USD->local rate effective on the submission date (ASM-031); the same rate is stored in fx_rate_used. |
+| ASM-P6-04 | Line validation_result: FAIL when the line carries EXPENSE_OUTSIDE_EMPLOYMENT, EXPENSE_DATE_TOO_OLD, CURRENCY_MISMATCH, POLICY_NOT_APPLICABLE or MISSING_RECEIPT; else CAPPED when above the per-line limit; else PASS. approved_amount (BR-EX-14) = SUM(min(line, per-line limit)) over non-FAIL lines; it is computed at submission but stored only when the claim is APPROVED (DB CHECK, Phase 7). |
+| ASM-P6-05 | Budget at submission (BR-BUD-01..04): available = budget - actual - committed from the budget ledger of the period containing the submission date; a RESERVATION of the claim total is posted in the same transaction (also when BUDGET_EXCEEDED, BR-BUD-03) and RELEASED at once when the outcome is REJECTED or RETURNED_FOR_CORRECTION. ESCALATED claims keep their reservation until a decision (Phase 7). The DB store keeps cost_center_budget.committed_amount equal to the ledger (V-ARITH-08). |
+| ASM-P6-06 | Cross-claim checks at submission (duplicate receipt, duplicate claim pattern, split claim) compare with every earlier submitted claim, whatever its outcome (a rejected claim's receipt is still a used receipt). Batch detectors use every submitted claim. |
+| ASM-P6-07 | claim.expense_policy_id: a version already stored on the claim is kept and checked (POLICY_VERSION_EXPIRED); otherwise the version of the primary (highest-amount) line's category is stored (BR-EX-03). total_amount_usd, fx_rate_used, receipt_status and the line policy/result are written at submission by the DB store; the generated dataset keeps them NULL / PENDING until S6 (Phase 7), so V-ARITH-07 is still not applicable there. |
+
+### 10.2 Decisions
+
+| ID | Decision | Alternatives considered |
+|---|---|---|
+| DEC-P6-01 | Same pattern as leave: pure validate_claim / submit_expense over an ExpenseStore protocol, with an in-memory store and a PostgreSQL store (src/repositories/expense_repository.py) that locks the claim, its cost_center and the budget row FOR UPDATE. Finding/FindingSet moved to exception_service and id allocation plus the status/exception writes to src/repositories/base.py, shared by leave and expense (behaviour unchanged, leave tests pass). | Separate copies per request type. |
+| DEC-P6-02 | DEC-01 for S4: a drawn claim is kept only when validate_claim finds no code on it alone. The draws are unchanged, so expense_claim, receipt and all ground truth are byte-identical to Phase 5; only expense_line gains quantity and unit_amount. | Also guard cross-claim patterns in S4 (would remove the natural split pair labelled in Phase 4 and change the dataset). |
+| DEC-P6-03 | detections.csv now holds leave and expense detections (submission findings and the duplicate-receipt and split batch detectors). | Separate files. |
+| DEC-P6-04 | src/evaluation/expense_service_vs_oracle.py compares all 1,000 claims; routing codes are reported as ROUTING_PHASE7 (DEC-P5-05). | |
+| DEC-P6-05 | Not in Phase 6: routing and approvals (Phase 7), reimbursement (Phase 8), audit_event and idempotency rows (Phase 8), API and dashboard. | |
+
+### 10.3 Ambiguities found in Phase 6 (default APPLIED; please confirm or change)
+
+| ID | Ambiguity | Default applied |
+|---|---|---|
+| AMB-P6-01 | An ESCALATED claim that the process owner will later reject (split, cross-employee duplicate) still holds its budget reservation until then (BR-BUD-03/04); the oracle's eventual model (ASM-P4-04) drops it at once. No claim in the dataset is affected today (0 disagreements). | Keep the reservation until the decision, as the rules say. |
+| AMB-P6-02 | Which line codes make a line FAIL (affects approved_amount only after approval). | ASM-P6-04. |
+| AMB-P6-03 | How to give every line a quantity without changing amounts. | ASM-P6-02 (divisors of the amount; quantity 1 when none fits after an S5 edit). |
+| AMB-P6-04 | DEC-01 for S5 expense edits: the S5 constructions keep their own helpers (lines_fit, split_safe); every result is then checked by the oracle (DEC-P4-02) and by the services-vs-oracle comparison (0 disagreements, tested). Rebuilding each S5 edit guard on the services, as done for leave, would change the expense dataset. | Keep the S5 expense helpers; S4 uses the services. |
+| AMB-P6-05 | Cross-claim checks against earlier claims of any outcome, or only claims still holding. | Any outcome (ASM-P6-06), same as the oracle. |

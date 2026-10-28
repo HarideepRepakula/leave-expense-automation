@@ -31,7 +31,7 @@ def test_services_agree_with_the_oracle_on_every_leave_request(gen):
 
 def test_leave_detections_equal_the_planted_leave_labels(gen):
     _, _, g = gen
-    found = {(d.record_id, d.exception_code) for d in g.detections}
+    found = {(d.record_id, d.exception_code) for d in g.detections if d.record_type == "LEAVE"}
     expected = {(r["affected_record_id"], r["issue_type"]) for r in g.truth.tables["anomaly_label"]
                 if r["affected_record_type"] == "LEAVE" and r["expected_detection"] == "DETECT"
                 and r["scenario_id"] != "S19-L"}

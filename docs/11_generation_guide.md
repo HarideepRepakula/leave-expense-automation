@@ -78,6 +78,8 @@ Compare the Phase 5 leave services with the independent oracle (every leave requ
 data/validation/leave_service_vs_oracle.csv, not part of the manifest):
 `python -m src.evaluation.leave_service_vs_oracle` (or `--raw data\starter\raw --out data\starter\validation`).
 Exit code 0 = no disagreement; records whose only difference is a Phase 7 routing code are listed as ROUTING_PHASE7.
+The same for expense claims (Phase 6): python -m src.evaluation.expense_service_vs_oracle (writes data/validation/expense_service_vs_oracle.csv).
+Since Phase 6 every expense line carries quantity and unit_amount (ASM-P6-02) and detections.csv also holds expense detections.
 Rebuild the negative fixtures (tests only, never in data/): `python scripts\build_negative_fixtures.py`.
 
 ## 4. Reproducibility rules

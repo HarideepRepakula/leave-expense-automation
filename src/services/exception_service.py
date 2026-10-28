@@ -6,7 +6,7 @@ deciding severity. Classification is a pure function of the codes found in one s
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from src.common.enums import ExceptionClass, Severity, WorkflowStatus
 
@@ -26,6 +26,29 @@ class CodeInfo:
     exception_class: str
     severity: str
     order: int
+
+
+@dataclass
+class Finding:
+    code: str
+    detail: str
+    other_request_ids: list[str] = field(default_factory=list)   # or the line ids a line-level code refers to
+
+
+class FindingSet:
+    """One Finding per code, in the order the checks run; repeated hits collect the related ids."""
+
+    def __init__(self) -> None:
+        self.items: dict[str, Finding] = {}
+
+    def add(self, code: str, detail: str, other: str | None = None) -> None:
+        f = self.items.setdefault(code, Finding(code, detail))
+        if other is not None and other not in f.other_request_ids:
+            f.other_request_ids.append(other)
+            f.detail = f"{detail}: {', '.join(f.other_request_ids)}"
+
+    def findings(self) -> list[Finding]:
+        return list(self.items.values())
 
 
 @dataclass(frozen=True)

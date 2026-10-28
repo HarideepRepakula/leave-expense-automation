@@ -250,6 +250,10 @@ class Workbench:
         the line reaches the receipt threshold (valid unless the scenario says otherwise)."""
         ln.update(changes)
         ln["line_amount"] = money(ln["line_amount"])
+        # ASM-P6-02: keep quantity x unit = amount; the quantity stays when it divides the new amount exactly.
+        q = int(ln["quantity"] or 1)
+        q = q if int(ln["line_amount"] * 100) % q == 0 else 1
+        ln["quantity"], ln["unit_amount"] = Decimal(q).quantize(CENT), money(ln["line_amount"] / q)
         claim = self.claims[ln["expense_claim_id"]]
         if rng is not None and ln["line_amount"] >= self.xpol(ln["category"], claim)["receipt_threshold"]:
             self.ensure_receipt(ln, rng)
