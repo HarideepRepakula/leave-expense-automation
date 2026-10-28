@@ -5,7 +5,8 @@ from pathlib import Path
 
 import yaml
 
-CONFIG_FILES = ("generation", "organisation", "leave_policies", "expense_policies", "approval_rules", "calendar")
+CONFIG_FILES = ("generation", "organisation", "leave_policies", "expense_policies", "approval_rules", "calendar",
+                "exception_codes")
 
 
 def load_config(config_dir: Path) -> dict[str, dict]:

@@ -8,8 +8,10 @@ master_load_timestamp: "2024-12-31T00:00:00Z"   # created_at of master rows (doc
 
 # RNG streams, in spawn order. Append new names at the END only: SeedSequence.spawn assigns children by
 # position, so inserting a name would change every later stream (docs/07 section 4).
+# Phase 4: `anomalies` / `boundaries` drive LEAVE edits; `anomalies_expense` / `boundaries_expense` drive EXPENSE
+# edits, so changing one request volume never reshuffles the other's planted records (AM-A8, CF-10).
 streams: [employees, cost_centers, balances, leave, expenses, anomalies, boundaries, delays, payments,
-          delegations, users]
+          delegations, users, anomalies_expense, boundaries_expense]
 
 volumes:                              # CLI flags override employees / leave_requests / expense_claims
   employees: 400
@@ -111,3 +113,30 @@ expenses:
     TRAINING: [Course fee, Conference registration, Certification exam]
     CLIENT_ENTERTAINMENT: [Client dinner, Client lunch, Event tickets]
   max_attempts_per_claim: 500
+
+# Stage S5 (Phase 4): planted scenarios, controls and boundaries (docs/07 sections 7-8, ASM-027).
+# Counts are at the full reference volumes; other volumes scale them, minimum 1 (ASM-028).
+# Units: records, except S02/S06a/S06b (pairs) and S09 (pairs and triples).
+anomalies:
+  reference_volumes: {leave: 800, expense: 1000}
+  leave: {S01: 8, S02: 8, S03: 12, S19-L: 4, S22: 8, S23: 8}
+  expense: {S05: 10, S06a: 8, S06b: 8, S07a: 8, S07b: 8, S08: 8, S10: 8, S15: 8, S19-E: 4, S21: 8, S26: 8}
+  split_groups: {pairs: 6, triples: 2}          # S09
+  controls:
+    S01b: 8                                     # permitted negative balance, LPOL-ANNUAL-US
+    S04_min_total: 40                           # leave requests spanning a holiday, natural + planted
+    S24: {leave: 4, expense: 4}                 # delegated L1
+    S14-L5: 8                                   # ASM-P4-01: claims above 5,000 USD (L5 route)
+  attempts: {S11: 8, S12: 8, S13: 8, S18: 8}    # rows only exist once Phases 7-8 build them
+  fixtures: {S16: 8, S17: 8, S20: 2}            # tests/fixtures/negative
+  parameters:
+    s07a_line_factor: ["1.20", "2.00"]          # line amount = per-line limit x factor
+    s07b_claim_factor: ["1.05", "1.30"]         # claim total = per-claim limit x factor
+    s01_excess_days: [1, 3]                     # quantity above the available balance (whole days)
+    s01b_negative_days: [1, 3]                  # LPOL-ANNUAL-US balance after approval: -1..-3 (limit 3)
+    s03_excess_days: [1, 4]
+    s14l5_usd: ["5100.00", "5800.00"]           # within the 6,000 USD per-claim limit
+    s22_max_gap_hours: 24                       # partner request submitted at most this long before
+boundaries:
+  per_case: 3                                   # BC-01..BC-09 each sub-case (docs/02 section 6)
+  bc10_groups: 2

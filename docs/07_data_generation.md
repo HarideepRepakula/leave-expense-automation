@@ -276,3 +276,19 @@ Naturally occurring violations (section 7.4) are the exception codes the referen
 ## 11. Validation after export
 
 src/validation runs on the exported files and, when the database is loaded, on the database: PK uniqueness, FK integrity, enums, ID patterns, date ordering, employment-date consistency, policy effective dates, lifecycle legality from status events, approval sequence consistency, arithmetic (balances vs ledger, claim totals, approved amounts, reimbursement amounts, FX), workflow integrity (routes, authorised approvers, no self-approval, no premature or duplicate reimbursement). Output: data/validation/validation_report.{csv,json,md} and detections.csv for the evaluation.
+
+## 12. As implemented in Phase 4 (assumptions in docs/09 section 8)
+
+| Piece | Module | Notes |
+|---|---|---|
+| S5 editing toolkit | src/data/stages/workbench.py | in-place edits through the shared services; after all edits ids are re-derived in submission order, receipts and the ledger renumbered (DEC-P4-03) |
+| S5 anomalies | src/data/stages/anomalies.py | all Group A scenarios and controls S01b, S04, S14-L5, S24; one planted scenario per record; edited employees are locked; leave and expense draw from separate streams (ASM-P4-02) |
+| S5 boundaries | src/data/stages/boundaries.py | BC-01..BC-10 |
+| S9 ground truth | src/data/stages/ground_truth.py | construction vs oracle check (stops on disagreement, DEC-P4-02), natural labels, scenarios.json, files and ground_truth schema |
+| Oracle | src/reference/oracle.py | plain Python + PyYAML, not pandas (DEC-P4-01); eventual outcome until Phase 7 adds timing (ASM-P4-03) |
+| Validation | src/validation/{reader,checks,report,__main__}.py | 21 structural/arithmetic/workflow checks; M1-M3; detections.csv arrives with the Phase 5-6 detectors (DEC-P4-07) |
+| Negative fixtures | tests/fixtures/negative/ via scripts/build_negative_fixtures.py | 8 lifecycle (S16), 8 arithmetic (S17), 2 rule-conflict (S20), 3 structural |
+
+S19 construction (fixed here, AMB-P4-01): the requester is the G7 (no L1). Attempt-type scenarios S11, S12, S13, S18 and
+the technical failures S25 need approval steps, reimbursements and idempotency rows; they are listed in scenarios.json
+with actual_count NULL and are built with Phases 7-8.

@@ -1,22 +1,24 @@
 # 11. Synthetic data generation guide
 
-Phase 3 deliverable. How to run the generator, what it produces, and how to check that it is reproducible.
-Design background: docs/07. Every policy value is an illustrative synthetic ASSUMPTION (docs/09).
+Phase 3 deliverable, extended in Phase 4. How to run the generator, what it produces, and how to check that it is
+reproducible. Design background: docs/07. Every policy value is an illustrative synthetic ASSUMPTION (docs/09).
 
-## 1. What Phase 3 generates
+## 1. What the generator produces
 
-| Stage (docs/07) | Status | Tables |
+| Stage (docs/07) | Status | Tables / files |
 |---|---|---|
-| S1 master | done | department, cost_center, cost_center_budget, employee, employee_cost_center_assignment, country_holiday, fx_rate, delegation, leave_policy, expense_policy, approval_rule, role, application_user, user_role |
-| S2 balances | partly: OPENING + ACCRUAL | leave_balance (2025, 2026), leave_balance_transaction. CARRY_FORWARD and USAGE arrive with the Phase 7 engine |
-| S3 leave | done (raw inputs) | leave_request: status SUBMITTED, about 1% DRAFT |
+| S1 master | done (Phase 3; exception_code added in Phase 4) | department, cost_center, cost_center_budget, employee, employee_cost_center_assignment, country_holiday, fx_rate, delegation, leave_policy, expense_policy, approval_rule, exception_code, role, application_user, user_role |
+| S2 balances | partly: OPENING + ACCRUAL (+ USAGE of legacy approvals, Phase 4) | leave_balance (2025, 2026), leave_balance_transaction. CARRY_FORWARD and engine USAGE arrive with Phase 7 |
+| S3 leave | done (raw inputs) | leave_request: SUBMITTED, about 1% DRAFT, 24 legacy APPROVED (S01, S02) |
 | S4 expenses | done (raw inputs) | expense_claim (SUBMITTED, about 1% DRAFT), expense_line (PENDING), receipt |
-| S5 anomalies, S9 ground truth | Phase 4 | |
+| S5 anomalies + boundaries | done (Phase 4) | the same rows, modified in place (docs/07 section 12) |
+| S9 ground truth | done (Phase 4) | data/ground_truth/*, ground_truth schema with --load |
+| validation | done (Phase 4) | data/validation/* (src/validation) |
 | S6 outcomes | Phase 7 | approval steps, events, exceptions, budget ledger |
 | S7 reimbursements, S8 audit | Phase 8 | |
 
-The Phase 3 dataset is a **valid baseline**: no overlaps, enough balance at submission, inside employment,
-within policy limits, receipts where required, unique receipt hashes (DEC-41). Anomalies are added in Phase 4.
+Stages S1-S4 still produce the Phase 3 **valid baseline** (DEC-41); S5 then plants the docs/07 section 7 scenarios
+by modifying existing records only, so the core volumes stay exactly 400 / 6 / 800 / 1,000.
 
 ## 2. Commands (Windows PowerShell, project root, venv active)
 
@@ -59,13 +61,25 @@ If PowerShell blocks the script, run it once with `powershell -ExecutionPolicy B
 | data/raw/<table>.json | same rows as JSON arrays; decimals and timestamps as strings, `sort_keys`, 2-space indent (DEC-39) | no |
 | data/processed/seed.sql | INSERT statements in dependency order for an empty ops schema (`psql -d lea_dev -f data/processed/seed.sql`) | no |
 | data/processed/dev_credentials.csv | synthetic login passwords for the simulated users (ASM-P3-10) | no (never commit) |
-| data/manifest.json | seed, parameters, as-of date, generator version, row counts, SHA-256 per file, generated_at | yes |
+| data/ground_truth/record_expectations.csv | one row per request (1,800): expected route (JSON list of {level, approver_id, covers, delegated_from}), expected outcome, eligibility, codes (JSON list), approved amount | yes |
+| data/ground_truth/anomaly_labels.csv | one row per planted or natural label (GTL-000001..): scenario, record, issue type, DETECT / NOT_DETECT, behaviour, injection reason, is_planted | yes |
+| data/ground_truth/boundary_cases.csv | BC-01..BC-10 records (GTB-0001..) with the expected outcome | yes |
+| data/ground_truth/scenarios.json, ground_truth.json | planned and actual count per scenario; everything combined | yes |
+| data/validation/validation_report.{csv,json,md}, validation_findings.csv | src/validation results, M1-M3 | no (regenerable) |
+| data/manifest.json | seed, parameters, as-of date, generator version, row counts, ground-truth counts, SHA-256 per file (raw, processed, ground_truth, validation), generated_at | yes |
+
+Run validation on its own: `python -m src.validation` (or `--data data\starter`). Exit code 0 = no check failed.
+Rebuild the negative fixtures (tests only, never in data/): `python scripts\build_negative_fixtures.py`.
 
 ## 4. Reproducibility rules
 
 - One master seed -> numpy SeedSequence -> one child stream per name in `config/generation.yaml: streams`
-  (employees, cost_centers, balances, leave, expenses, anomalies, boundaries, delays, payments, delegations, users).
-  New stream names must be appended at the end of that list, or every later stream changes.
+  (employees, cost_centers, balances, leave, expenses, anomalies, boundaries, delays, payments, delegations, users,
+  anomalies_expense, boundaries_expense). New stream names must be appended at the end of that list, or every
+  later stream changes. S5 uses `anomalies` / `boundaries` for leave edits and `anomalies_expense` /
+  `boundaries_expense` for expense edits, so stream independence also holds after injection (ASM-P4-02).
+- `manifest.generated_at` is the time the content was FIRST generated: when a run produces exactly the same
+  content, manifest.json is left untouched, so git shows no change (ASM-P4-17).
 - Stream independence (CF-10): changing `--expense-claims` does not change any leave or master row, and changing
   `--leave-requests` does not change any expense row (tested). Changing `--employees` changes the people that
   requests reference, so leave and expense rows change too; that is expected.
@@ -82,6 +96,8 @@ If PowerShell blocks the script, run it once with `powershell -ExecutionPolicy B
 | Configuration | policies, limits, rules, holidays, FX, budget of CC-0024 | config/*.yaml |
 | Raw random input | names, grades, departments, dates, durations, amounts, merchants, budgets | the stage's RNG stream |
 | Calculated by shared rules | business days, requested quantity, accruals, policy version, local amounts, totals, receipt hash | src/services (DEC-37), src/common/money.py |
+| Planted by construction (S5) | which records carry a scenario, scenario parameters | `anomalies*` / `boundaries*` streams |
+| Expected by the independent oracle (S9) | expected codes, routes, outcomes, natural labels | src/reference (never src/services) |
 | Decided by the workflow engine | validation results, routes, approvals, reimbursements | not yet: Phases 7-8 |
 
 ## 6. Troubleshooting

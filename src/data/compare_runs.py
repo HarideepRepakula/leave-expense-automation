@@ -27,13 +27,19 @@ def main(argv: list[str] | None = None) -> int:
     for name in a["row_counts"]:
         print(f"  {name:<32}{a['row_counts'][name]:>8}{b['row_counts'].get(name, '-'):>8}")
     same_files = 0
+    per_folder: dict[str, list[int]] = {}
     for rel in sorted(set(a["files"]) | set(b["files"])):
         on_disk_a = sha256_file(a_dir / rel) if (a_dir / rel).exists() else None
         on_disk_b = sha256_file(b_dir / rel) if (b_dir / rel).exists() else None
+        counts = per_folder.setdefault(rel.split("/")[0], [0, 0])
+        counts[0] += 1
         if on_disk_a == on_disk_b == a["files"].get(rel) == b["files"].get(rel):
             same_files += 1
+            counts[1] += 1
         else:
             print(f"  DIFFERENT: {rel}")
+    for folder, (n, same) in sorted(per_folder.items()):
+        print(f"  {folder + '/':<16}files {n:>3}   identical SHA-256 {same:>3}")
     diffs = compare_manifests(a, b)
     print(f"files compared: {len(a['files'])}; identical SHA-256: {same_files}")
     print(f"fingerprint A: {dataset_fingerprint(a)}")

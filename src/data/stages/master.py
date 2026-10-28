@@ -42,6 +42,7 @@ def build_master(cfg: dict, p: GenParams, streams: RngStreams) -> tuple[dict[str
     t["leave_policy"] = _leave_policies(cfg)
     t["expense_policy"] = _expense_policies(cfg, t["fx_rate"])
     t["approval_rule"] = _approval_rules(cfg)
+    t["exception_code"] = _exception_codes(cfg)
     t["delegation"] = _delegations(cfg, p, streams, t["employee"])
     t["role"], t["application_user"], t["user_role"], credentials = _users(cfg, p, streams, t["employee"])
     return t, credentials
@@ -367,6 +368,20 @@ def _approval_rules(cfg: dict) -> list[dict]:
             "is_active": True,
         }
         for r in a["rules"]
+    ]
+
+
+DEFAULT_ROUTE = {"HARD": "REJECTED", "CORRECTABLE": "RETURNED_FOR_CORRECTION", "SOFT": "ESCALATED_FOR_REVIEW",
+                 "INFO": "NONE"}
+
+
+def _exception_codes(cfg: dict) -> list[dict]:
+    """Exception code catalogue from config/exception_codes.yaml (docs/02 section 5, docs/05 section 9.1)."""
+    return [
+        {"exception_code": c["code"], "exception_class": c["class"], "severity": c["severity"],
+         "default_route": DEFAULT_ROUTE[c["severity"]], "requester_message_template": c["requester"],
+         "analyst_message_template": c["analyst"]}
+        for c in cfg["exception_codes"]["codes"]
     ]
 
 

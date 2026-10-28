@@ -9,28 +9,40 @@ import json
 
 import pytest
 
-from src.data.export import compare_manifests, dataset_fingerprint, sha256_file, write_dataset
-from src.data.generate import generate
+from src.data.export import compare_manifests, dataset_fingerprint, sha256_file
+from src.data.generate import build, generate, write_outputs
 from tests.data.conftest import FULL, SEED, STARTER
 
 
 def _run_to(folder, seed, volumes):
-    dataset, creds, meta = generate(seed, **volumes)
-    return write_dataset(dataset, creds, folder, meta)
+    return write_outputs(build(seed, **volumes), folder)[0]
 
 
 @pytest.mark.parametrize("volumes", [STARTER, FULL], ids=["starter", "full"])
 def test_two_runs_identical_counts_and_checksums(tmp_path, volumes):
+    """M13 covers operational, ground-truth and validation files alike (docs/08 M13)."""
     a = _run_to(tmp_path / "run_a", SEED, volumes)
     b = _run_to(tmp_path / "run_b", SEED, volumes)
-    assert a["row_counts"] == b["row_counts"]
+    assert a["row_counts"] == b["row_counts"] and a["ground_truth_counts"] == b["ground_truth_counts"]
     assert compare_manifests(a, b) == []
     assert dataset_fingerprint(a) == dataset_fingerprint(b)
+    folders = {rel.split("/")[0] for rel in a["files"]}
+    assert {"raw", "processed", "ground_truth", "validation"} <= folders
     # The manifest checksums match the files actually on disk, in both folders.
     for rel, digest in a["files"].items():
         assert sha256_file(tmp_path / "run_a" / rel) == digest == sha256_file(tmp_path / "run_b" / rel)
     on_disk = json.loads((tmp_path / "run_a" / "manifest.json").read_text(encoding="utf-8"))
     assert on_disk["files"] == a["files"]
+
+
+def test_rerun_into_same_folder_leaves_manifest_untouched(tmp_path):
+    """Carry-in: re-generating identical content keeps generated_at, so git sees no change in manifest.json."""
+    _run_to(tmp_path, SEED, STARTER)
+    first = (tmp_path / "manifest.json").read_bytes()
+    _run_to(tmp_path, SEED, STARTER)
+    assert (tmp_path / "manifest.json").read_bytes() == first
+    _run_to(tmp_path, SEED + 1, STARTER)                         # different content -> rewritten
+    assert (tmp_path / "manifest.json").read_bytes() != first
 
 
 def test_different_seed_changes_the_data(tmp_path):

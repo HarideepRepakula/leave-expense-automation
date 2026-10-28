@@ -4,14 +4,19 @@ Full baseline (default volumes from config/generation.yaml):
     python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000
 Starter dataset (ASM-028, same code, one-tenth scale):
     python -m src.data.generate --seed 20261022 --employees 40 --leave-requests 80 --expense-claims 100 --out data/starter
-Add --load to replace the contents of lea_dev (DATABASE_URL in .env) with the generated dataset.
+Add --load to replace the contents of lea_dev (DATABASE_URL in .env) with the generated dataset and its ground
+truth.
 
-Phase 3 runs stages S1-S4 (master, balances, leave, expenses) and exports. Later phases add S5-S9.
+Stages (docs/07 section 2): S1 master, S2 balances, S3 leave, S4 expenses (valid baseline, Phase 3); S5 anomalies
+and boundaries, S9 ground truth from the planted definitions and the independent oracle, then export and
+validation (Phase 4). S6-S8 (outcomes, reimbursements, audit) arrive with the Phase 5-8 services.
 """
 from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -20,19 +25,33 @@ from src.common.rng import RngStreams
 from src.data.config_loader import load_config
 from src.data.dataset import TABLE_ORDER, Dataset, sort_by_pk
 from src.data.stages import GenParams
+from src.data.stages.anomalies import inject_anomalies
 from src.data.stages.balances import build_balances, ledger_index
+from src.data.stages.boundaries import inject_boundaries
 from src.data.stages.expenses import build_expense_claims
+from src.data.stages.ground_truth import GroundTruth, build_ground_truth, write_ground_truth
 from src.data.stages.leave import build_leave_requests
 from src.data.stages.master import build_master
+from src.data.stages.workbench import Workbench
 from src.services.calendar_service import HolidayCalendar
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "config"
+FIXTURES_DIR = ROOT / "tests" / "fixtures" / "negative"
 
 
-def generate(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
-             expense_claims: int | None = None, config_dir: Path = CONFIG_DIR) -> tuple[Dataset, list[dict], dict]:
-    """Run stages S1-S4 in memory. Returns (dataset, dev_credentials, manifest metadata)."""
+@dataclass
+class Generation:
+    dataset: Dataset
+    credentials: list[dict]
+    meta: dict
+    truth: GroundTruth | None
+    config_dir: Path
+
+
+def build(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
+          expense_claims: int | None = None, config_dir: Path = CONFIG_DIR, baseline_only: bool = False) -> Generation:
+    """Run the stages in memory. baseline_only=True stops after S4 (the Phase 3 valid baseline)."""
     cfg = load_config(config_dir)
     g = cfg["generation"]
     vol = g["volumes"]
@@ -60,24 +79,62 @@ def generate(seed: int | None = None, employees: int | None = None, leave_reques
     dataset.update(build_expense_claims(                                                         # S4
         cfg, p, streams, dataset["employee"], dataset["employee_cost_center_assignment"],
         dataset["expense_policy"], dataset["fx_rate"]))
+    stages = ["S1 master", "S2 balances (opening + accrual)", "S3 leave", "S4 expenses"]
+
+    truth = None
+    if not baseline_only:
+        wb = Workbench(cfg, p, dataset, calendar)                                                # S5
+        inject_anomalies(cfg, p, wb, {"LEAVE": streams.get("anomalies"), "EXPENSE": streams.get("anomalies_expense")})
+        inject_boundaries(cfg, p, wb, {"LEAVE": streams.get("boundaries"),
+                                       "EXPENSE": streams.get("boundaries_expense")})
+        leave_map, claim_map = wb.finalise()
+        truth = build_ground_truth(cfg, p, dataset, wb.plants, wb.boundaries, leave_map, claim_map,  # S9
+                                   config_dir, FIXTURES_DIR)
+        stages += ["S5 anomalies + boundaries (in place)", "S9 ground truth (planted definitions + reference oracle)"]
 
     missing = [t for t in TABLE_ORDER if t not in dataset]
     if missing:
         raise RuntimeError(f"stages did not produce: {missing}")
     meta = {
-        "phase": 3,
-        "stages": ["S1 master", "S2 balances (opening + accrual)", "S3 leave", "S4 expenses"],
+        "phase": 3 if baseline_only else 4,
+        "stages": stages,
         "seed": p.seed,
         "parameters": {"employees": p.employees, "leave_requests": p.leave_requests,
                        "expense_claims": p.expense_claims},
         "as_of_date": p.as_of.isoformat(),
         "window_start": p.window_start.isoformat(),
     }
-    return dataset, credentials, meta
+    if truth is not None:
+        meta["ground_truth_counts"] = {name: len(rows) for name, rows in truth.tables.items()}
+    return Generation(dataset, credentials, meta, truth, config_dir)
 
 
-def _print_summary(dataset: Dataset, manifest: dict | None, out: Path | None, load_counts: dict | None,
-                   db_name: str | None) -> None:
+def generate(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
+             expense_claims: int | None = None, config_dir: Path = CONFIG_DIR) -> tuple[Dataset, list[dict], dict]:
+    """Full pipeline; returns (dataset, dev_credentials, manifest metadata) for callers that only need ops data."""
+    gen = build(seed, employees, leave_requests, expense_claims, config_dir)
+    return gen.dataset, gen.credentials, gen.meta
+
+
+def write_outputs(gen: Generation, out: Path) -> tuple[dict, list]:
+    """Export ops tables, ground truth and the validation report; one manifest checksums all of them."""
+    from src.data.export import write_dataset
+    from src.validation.report import validate_folder, write_report
+
+    results: list = []
+
+    def extra(out_dir: Path) -> list[Path]:
+        files = write_ground_truth(gen.truth, out_dir / "ground_truth") if gen.truth is not None else []
+        checks, metrics = validate_folder(out_dir / "raw", gen.config_dir)
+        results.extend(checks)
+        return files + write_report(checks, metrics, out_dir / "validation")
+
+    return write_dataset(gen.dataset, gen.credentials, out, gen.meta, extra_files=extra), results
+
+
+def _print_summary(gen: Generation, manifest: dict | None, out: Path | None, results: list,
+                   load_counts: dict | None, db_name: str | None) -> None:
+    dataset = gen.dataset
     print("Row counts per table:")
     for name in TABLE_ORDER:
         line = f"  {name:<34}{len(dataset[name]):>7}"
@@ -91,6 +148,25 @@ def _print_summary(dataset: Dataset, manifest: dict | None, out: Path | None, lo
                      ("leave_balance", "leave_balance_id")]:
         rows = sort_by_pk(name, dataset[name])
         print(f"  {name:<28}{rows[0][pk]}  ...  {rows[-1][pk]}")
+    if gen.truth is not None:
+        print("Scenarios (planned / actual records):")
+        for s in gen.truth.tables["scenario"]:
+            actual = "-" if s["actual_count"] is None else s["actual_count"]
+            print(f"  {s['scenario_id']:<8}{s['issue_type']:<36}{s['planned_count']:>5} /{actual!s:>5}")
+        labels = gen.truth.tables["anomaly_label"]
+        planted = [r for r in labels if r["is_planted"] and r["expected_detection"] == "DETECT"]
+        natural = Counter(r["issue_type"] for r in labels if r["scenario_id"] == "NATURAL")
+        print(f"Ground truth: {len(gen.truth.tables['record_expectation'])} record expectations, {len(labels)} labels "
+              f"({len(planted)} planted positives, {sum(natural.values())} natural positives), "
+              f"{len(gen.truth.tables['boundary_case'])} boundary cases")
+        print("Natural (unplanted) positives by issue type: "
+              + (", ".join(f"{k} {v}" for k, v in sorted(natural.items())) or "none"))
+    if results:
+        failed = [r for r in results if r.status == "FAIL"]
+        print(f"Validation: {len(results)} checks, {len(failed)} failed, "
+              f"{sum(r.status == 'NOT_APPLICABLE' for r in results)} not applicable (no rows yet)")
+        for r in failed:
+            print(f"  FAIL {r.check_id}: {r.violations} findings")
     if manifest is not None:
         from src.data.export import dataset_fingerprint
         print(f"Exported {len(manifest['files'])} files to {out}; manifest: {out / 'manifest.json'}")
@@ -108,30 +184,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config-dir", type=Path, default=CONFIG_DIR)
     parser.add_argument("--no-export", action="store_true", help="skip writing files")
     parser.add_argument("--load", action="store_true",
-                        help="replace the ops data in DATABASE_URL (lea_dev) with this dataset")
+                        help="replace the ops and ground_truth data in DATABASE_URL (lea_dev) with this dataset")
     parser.add_argument("--database-url", help="override DATABASE_URL from .env")
     args = parser.parse_args(argv)
 
-    dataset, credentials, meta = generate(args.seed, args.employees, args.leave_requests, args.expense_claims,
-                                          args.config_dir)
-    manifest = None
-    if not args.no_export:
-        from src.data.export import write_dataset
-        manifest = write_dataset(dataset, credentials, args.out, meta)
+    gen = build(args.seed, args.employees, args.leave_requests, args.expense_claims, args.config_dir)
+    manifest, results = (None, []) if args.no_export else write_outputs(gen, args.out)
     load_counts = db_name = None
     if args.load:
         from src.common.config import get_settings
         from src.data.loader import check_target, load_dataset
+        from src.data.stages.ground_truth import load_ground_truth
         url = args.database_url or get_settings().database_url
         db_name = check_target(url)
-        load_counts = load_dataset(dataset, url)
-        mismatched = [t for t in TABLE_ORDER if load_counts[t] != len(dataset[t])]
-        if mismatched:
-            print(f"ERROR: database counts differ from generated counts for {mismatched}", file=sys.stderr)
+        load_counts = load_dataset(gen.dataset, url)
+        mismatched = [t for t in TABLE_ORDER if load_counts[t] != len(gen.dataset[t])]
+        gt_counts = load_ground_truth(gen.truth, url)
+        gt_mismatch = [t for t, n in gt_counts.items() if n != len(gen.truth.tables[t])]
+        print(f"ground_truth schema rows in {db_name}: {gt_counts}")
+        if mismatched or gt_mismatch:
+            print(f"ERROR: database counts differ from generated counts for {mismatched + gt_mismatch}",
+                  file=sys.stderr)
             return 1
-    print(f"seed={meta['seed']} parameters={meta['parameters']} as_of={meta['as_of_date']}")
-    _print_summary(dataset, manifest, args.out if manifest else None, load_counts, db_name)
-    return 0
+    print(f"seed={gen.meta['seed']} parameters={gen.meta['parameters']} as_of={gen.meta['as_of_date']}")
+    _print_summary(gen, manifest, args.out if manifest else None, results, load_counts, db_name)
+    return 1 if any(r.status == "FAIL" for r in results) else 0
 
 
 if __name__ == "__main__":

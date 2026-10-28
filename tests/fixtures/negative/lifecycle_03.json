@@ -1,0 +1,42 @@
+{
+  "description": "illegal transition APPROVED -> CANCELLED",
+  "expected_checks": [
+    "V-LIFE-01"
+  ],
+  "fixture_id": "S16-03",
+  "scenario_id": "S16",
+  "tables": {
+    "request_status_event": [
+      {
+        "correlation_id": "00000000-0000-5000-8000-000000000001",
+        "event_id": "RSE-000000001",
+        "leave_request_id": "LVE-2026-000001",
+        "new_status": "SUBMITTED",
+        "occurred_at": "2026-03-01T09:00:00Z",
+        "previous_status": "",
+        "request_type": "LEAVE",
+        "submission_round": "1"
+      },
+      {
+        "correlation_id": "00000000-0000-5000-8000-000000000001",
+        "event_id": "RSE-000000002",
+        "leave_request_id": "LVE-2026-000001",
+        "new_status": "VALIDATING",
+        "occurred_at": "2026-03-01T09:00:01Z",
+        "previous_status": "SUBMITTED",
+        "request_type": "LEAVE",
+        "submission_round": "1"
+      },
+      {
+        "correlation_id": "00000000-0000-5000-8000-000000000001",
+        "event_id": "RSE-000000003",
+        "leave_request_id": "LVE-2026-000001",
+        "new_status": "CANCELLED",
+        "occurred_at": "2026-03-02T09:00:00Z",
+        "previous_status": "APPROVED",
+        "request_type": "LEAVE",
+        "submission_round": "1"
+      }
+    ]
+  }
+}

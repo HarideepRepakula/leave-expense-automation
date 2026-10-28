@@ -1,0 +1,23 @@
+{
+  "description": "approval step references a leave request that does not exist",
+  "expected_checks": [
+    "V-FK-01"
+  ],
+  "fixture_id": "STR-02",
+  "scenario_id": "STRUCTURAL",
+  "tables": {
+    "approval_step": [
+      {
+        "approval_rule_id": "RULE-L-001",
+        "approval_step_id": "APR-LVE-2026-000999-01",
+        "leave_request_id": "LVE-2026-000999",
+        "request_type": "LEAVE",
+        "required_level": "L1",
+        "sequence_no": "1",
+        "step_status": "PENDING",
+        "submission_round": "1"
+      }
+    ],
+    "leave_request": []
+  }
+}

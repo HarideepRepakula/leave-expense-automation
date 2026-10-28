@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
 Current phase: Phase 4 (Ground-truth generation and validation framework)
-Status: IN PROGRESS (started 2026-10-28).
+Status: COMPLETE AND VERIFIED 2026-10-28. Waiting for "APPROVED PHASE 4". Do not start Phase 5 before that.
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -11,6 +11,89 @@ Phase 3: APPROVED 2026-10-28. Owner verified fingerprint e8758c8f... and "132 pa
   - the dataset fingerprint WILL change when Phase 5 relaxes the guard (expected, not a defect);
   - Phase 5 must measure the cross-year share of leave requests and check it against ASM-042 (about 3 percent;
     Phase 3 baseline has 1 of 800).
+
+## Phase 4 record
+
+Scope implemented: S5 anomaly injection (all 18 Group A rows of docs/07 7.2 = 176 records; controls S01b, S04,
+S14-L5, S24), S5 boundary records BC-01..BC-10, the independent reference oracle (src/reference), S9 ground truth
+(files + ground_truth schema), the validation framework (src/validation, 21 checks, M1-M3), negative fixtures
+(S16 x8, S17 x8, S20 x2, 3 structural), exception_code catalogue, isolation and independence tests.
+Anomalies only MODIFY existing rows: volumes stay exactly 400 / 6 / 800 / 1,000 (tested at both scales).
+Waits for later phases (listed in scenarios.json with actual_count NULL): S11, S12, S18 (Phase 7 steps and
+idempotency), S13 and S25 (Phase 8), at-as-of timing of outcomes (Phase 7, ASM-P4-03), detections.csv (Phase 5-6).
+
+Carry-ins done: >= 8 claims at L5 (S14-L5: 8, tested); natural split pair labelled is_planted = false (2 labels);
+S19 = G7 requester only, no natural NO_VALID_APPROVAL_PATH (tested); .gitattributes (LF); manifest generated_at
+kept when content is unchanged (tested; verified on data/manifest.json: identical SHA-256 after a re-run).
+
+Files created:
+- config/exception_codes.yaml; .gitattributes; scripts/build_negative_fixtures.py
+- src/reference/oracle.py
+- src/data/stages/: workbench.py, anomalies.py, boundaries.py, ground_truth.py
+- src/validation/: reader.py, checks.py, report.py, __main__.py
+- data/ground_truth/: record_expectations.csv, anomaly_labels.csv, boundary_cases.csv, scenarios.json, ground_truth.json
+- tests/fixtures/negative/: lifecycle_01..08.json, arithmetic_01..08_*.json, structural_01..03_*.json, rules_conflict_01..02_*.yaml
+- tests/: test_ground_truth_isolation.py, test_reference_independence.py, reference/test_reference_oracle.py,
+  validation/test_validation.py, data/test_anomalies_and_ground_truth.py
+Files changed: config/generation.yaml (anomalies, boundaries, two streams appended), config/expense_policies.yaml
+(detection), src/data/{generate,export,compare_runs,config_loader,dataset}.py, src/data/stages/{balances,master}.py,
+tests/data/{conftest,test_generator_reproducibility}.py, tests/db/test_generator_load.py, docs/07 (section 12),
+docs/09 (section 8: ASM-P4-01..18, DEC-P4-01..07, AMB-P4-01..07), docs/11, docs/15, pyproject.toml (0.4.0),
+data/manifest.json. No new packages installed.
+
+Commands:
+    python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+    python -m src.validation
+    .\scripts\reproducibility_check.ps1
+    python scripts\build_negative_fixtures.py      # only to rebuild the fixtures
+    pytest -q
+
+REAL results (2026-10-28):
+- Full run with --load: ops counts in lea_dev = generated (employee 400, leave_policy 6, leave_request 800,
+  expense_claim 1000, expense_line 3201, receipt 2927, leave_balance_transaction 13083, exception_code 26, ...);
+  ground_truth schema: record_expectation 1800, anomaly_label 1022, boundary_case 40, scenario 41.
+- Every Group A scenario, control and boundary: actual = planned (S04 44 >= 40; S14 771 >= 150).
+  Labels: 180 planted positives (176 Group A + 4 BC-10), 29 planted controls, 3 natural positives
+  (SPLIT_CLAIM_SUSPECTED 2 = the Phase 3 natural pair, BUDGET_EXCEEDED 1 on CC-0024), 810 natural controls.
+  The oracle agreed with every planted and boundary record (generation stops otherwise).
+- Validation: 21 checks, 0 failed, 8 not applicable (no workflow rows yet); M1 0/24921, M2 0/30344, M3 3757/3757 = 1.0.
+- Dataset fingerprint (seed 20261022, 400/800/1000): 67515636201baff3d6746974fa34046b499c2511ffe79ed5a8c82b8ffe7a9de6
+  (changed from Phase 3 as expected: anomalies, exception_code, renumbered ids, two new streams).
+- reproducibility_check.ps1 (full scale): 53 files, 53 identical SHA-256 (raw 42, processed 2, ground_truth 5,
+  validation 4), RESULT: REPRODUCIBLE, exit 0.
+- pytest -q: 238 passed in 36.04s (0 failed, 0 skipped).
+- ruff --select F,E9 on all Phase 4 files: clean.
+Debugging during the phase (reproduce -> root cause -> smallest fix -> rerun):
+  1. KeyError on an UNPAID legacy approval: UNPAID has no balance, so no USAGE is posted (ASM-P4-09).
+  2. ground_truth CHECK route_is_array: None was stored as JSON null; the loader now sends SQL NULL.
+  3. Stream independence test failed: S5 used one stream for leave and expense; split into two (ASM-P4-02).
+  4. lea_test rejected S02 overlaps via the A3 test-only EXCLUDE: by design; test now proves it (DEC-P4-06).
+
+Open issues / for owner decision:
+- AMB-P4-01..07 in docs/09 section 8.3 (defaults applied; please confirm or change).
+- Starter scale cannot place every scenario (ASM-P4-18): BC-07, BC-10, one S09 group, S21, S24 have too few
+  candidates at 40/80/100. Full scale reaches every count.
+- Pre-existing lint finding (Phase 2 file, not touched): unused `date` import in tests/db/test_reimbursement_constraints.py.
+- Carried forward: cross-year rule and ~3 percent cross-year check in Phase 5 (fingerprint will change);
+  new JWT_SECRET before Phase 9; Groq names and limits (ASM-051/052) unverified until Phase 9; OneDrive copy to delete.
+
+Acceptance criteria (spec section 25) after Phase 4:
+1, 2: MET (unchanged; full dataset with anomalies loads into lea_dev).
+3 exact volumes: MET (400 / 6 / 800 / 1,000 after injection, tested).
+4 ID conventions: MET (V-PK-01 and V-ID-01: 0 violations; ids re-derived in submission order, tested).
+5 PK/FK validate: MET (M1 = 0, M2 = 0 from actual results).
+6 leave balances reconcile: MET for posted ledger (V-ARITH-05: 1909/1909, including legacy USAGE).
+8 expense totals reconcile with lines: MET (V-ARITH-01: 1000/1000; negative fixtures caught).
+12 edge cases represented and labelled: MET for dataset scenarios, boundaries and fixtures; PARTIAL overall:
+   attempt scenarios S11, S12, S13, S18 and S25 need Phases 7-8.
+13 ground truth isolated: MET (separate schema/folder, no FKs, no label columns, isolation tests).
+17 reproducible: MET including ground-truth and validation files (53/53).
+18 validation metrics from actual results: PARTIAL (M1-M3 computed now; M4-M18 need the engine, Phase 11).
+21 automated tests: MET for current scope (238 passed).
+22 documentation: PARTIAL (docs/07, 09, 11, 15 updated; full README in Phase 12).
+7, 9, 10, 11, 14, 15, 16: PARTIAL or NOT STARTED as before (services, engine, API: Phases 5-9); 19, 20: NOT STARTED.
+
+Next phase: Phase 5 (leave balance and leave request services) after "APPROVED PHASE 4".
 
 ## Phase 3 record
 

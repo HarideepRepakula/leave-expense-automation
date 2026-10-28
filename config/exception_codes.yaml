@@ -1,0 +1,147 @@
+# Exception code catalogue (docs/02 section 5, docs/05 sections 2, 3 and 9). Illustrative synthetic.
+# severity -> default_route: HARD -> REJECTED, CORRECTABLE -> RETURNED_FOR_CORRECTION,
+# SOFT -> ESCALATED_FOR_REVIEW, INFO -> NONE (ASM-029). Templates never use accusatory words (AM-H3, ASM-044);
+# a DB CHECK and a test enforce this. Placeholders in {braces} are filled by the explanation service (Phase 9).
+illustrative_synthetic: true
+
+# Simulated process-owner decisions on ESCALATED_FOR_REVIEW (docs/05 section 9.5, ASM-024). Used by the
+# Phase 7 simulation and by the independent reference oracle; codes not listed stay ESCALATED_FOR_REVIEW.
+process_owner_decisions:
+  approve_when_only: [OVERLAPPING_PENDING_LEAVE, BUDGET_EXCEEDED, POLICY_VERSION_EXPIRED]
+  reject_when_any: [SPLIT_CLAIM_SUSPECTED, DUPLICATE_RECEIPT_CROSS_EMPLOYEE]
+  return_when_any: [MISSING_COST_CENTER, INVALID_COST_CENTER]
+
+codes:
+  # --- leave ---
+  - code: INSUFFICIENT_BALANCE
+    class: POLICY_VIOLATION
+    severity: HARD
+    requester: "Requested {quantity} days exceeds the available balance of {available} days on {policy_id}."
+    analyst: "Balance check failed for {policy_id} year {year}: requested {quantity}, available {available}."
+  - code: NEGATIVE_BALANCE_UNPERMITTED
+    class: POLICY_VIOLATION
+    severity: SOFT
+    requester: "Your {policy_id} balance is below the permitted minimum and is under review."
+    analyst: "Ledger balance {available} on {balance_id} is below the permitted floor {floor}."
+  - code: OVERLAPPING_APPROVED_LEAVE
+    class: POLICY_VIOLATION
+    severity: HARD
+    requester: "The dates overlap approved leave {other_request_id}."
+    analyst: "Dates intersect approved request {other_request_id} of the same employee."
+  - code: OVERLAPPING_PENDING_LEAVE
+    class: POLICY_VIOLATION
+    severity: SOFT
+    requester: "The dates overlap pending request {other_request_id}; a reviewer will check them."
+    analyst: "Dates intersect pending request {other_request_id} of the same employee."
+  - code: LEAVE_OUTSIDE_EMPLOYMENT
+    class: POLICY_VIOLATION
+    severity: HARD
+    requester: "The leave dates fall outside your employment period."
+    analyst: "Leave {start_date}..{end_date} outside employment {employment_start}..{employment_end}."
+  - code: ZERO_BUSINESS_DAYS
+    class: DATA_QUALITY
+    severity: CORRECTABLE
+    requester: "The selected dates contain no business days. Please correct them."
+    analyst: "Requested quantity is below 0.5 days after removing weekends and holidays."
+  - code: HALF_DAY_ON_NON_BUSINESS_DAY
+    class: DATA_QUALITY
+    severity: CORRECTABLE
+    requester: "A half-day is set on a weekend or holiday. Please correct it."
+    analyst: "Half-day flag on non-business date {date}."
+  - code: MEDICAL_CERT_REQUIRED
+    class: POLICY_VIOLATION
+    severity: CORRECTABLE
+    requester: "Sick leave above {limit} days needs a medical certificate. Please attach it and resubmit."
+    analyst: "SICK request of {quantity} days without medical_cert_flag (limit {limit})."
+  - code: UNPAID_LIMIT_EXCEEDED
+    class: POLICY_VIOLATION
+    severity: HARD
+    requester: "Unpaid leave in {year} would exceed the yearly maximum of {limit} days."
+    analyst: "Unpaid days in {year} including this request: {total} (limit {limit})."
+  # --- expense ---
+  - code: EXPENSE_OUTSIDE_EMPLOYMENT
+    class: POLICY_VIOLATION
+    severity: HARD
+    requester: "Expense dated {date} falls outside your employment period."
+    analyst: "Line {line_id} dated {date} outside employment {employment_start}..{employment_end}."
+  - code: EXPENSE_DATE_TOO_OLD
+    class: DATA_QUALITY
+    severity: CORRECTABLE
+    requester: "Expense dated {date} is more than {days} days before submission or after it. Please correct it."
+    analyst: "Line {line_id} dated {date}; allowed window {window_start}..{submission_date}."
+  - code: LINE_LIMIT_EXCEEDED
+    class: POLICY_VIOLATION
+    severity: INFO
+    requester: "Line {line_id} exceeds the per-line limit of {limit}; the approved amount is capped."
+    analyst: "Line {line_id} amount {amount} above per-line limit {limit} on {policy_id}; capped."
+  - code: CLAIM_LIMIT_EXCEEDED
+    class: POLICY_VIOLATION
+    severity: SOFT
+    requester: "The claim total {total} exceeds the per-claim limit of {limit}; a reviewer will check it."
+    analyst: "Claim total {total} above per-claim limit {limit} on {policy_id}."
+  - code: MISSING_RECEIPT
+    class: DATA_QUALITY
+    severity: CORRECTABLE
+    requester: "Line {line_id} needs a receipt (amount at or above {threshold}). Please attach it."
+    analyst: "Line {line_id} amount {amount} >= receipt threshold {threshold} without a receipt."
+  - code: DUPLICATE_RECEIPT_SELF
+    class: DATA_QUALITY
+    severity: CORRECTABLE
+    requester: "This receipt was already used on your claim {other_claim_id}. Please check and correct."
+    analyst: "Receipt hash shared with claim {other_claim_id} of the same employee."
+  - code: DUPLICATE_RECEIPT_CROSS_EMPLOYEE
+    class: SUSPICIOUS_PATTERN
+    severity: SOFT
+    requester: "This receipt matches a receipt on another claim; a reviewer will check it."
+    analyst: "Receipt hash shared with claim {other_claim_id} of another employee; requires investigation."
+  - code: SPLIT_CLAIM_SUSPECTED
+    class: SUSPICIOUS_PATTERN
+    severity: SOFT
+    requester: "This claim is under review together with related claims (suspected split claim)."
+    analyst: "Suspected split claim, requires investigation: claims {claim_ids} total {total_usd} USD within {window} days."
+  - code: DUPLICATE_CLAIM_PATTERN
+    class: SUSPICIOUS_PATTERN
+    severity: SOFT
+    requester: "This claim looks identical to claim {other_claim_id}; a reviewer will check it."
+    analyst: "Same categories, total and earliest date as claim {other_claim_id}; requires investigation."
+  - code: MISSING_COST_CENTER
+    class: DATA_QUALITY
+    severity: SOFT
+    requester: "No cost center could be assigned to this claim; a reviewer will resolve it."
+    analyst: "Claim has no cost center."
+  - code: INVALID_COST_CENTER
+    class: DATA_QUALITY
+    severity: SOFT
+    requester: "The cost center {cost_center_id} is not active on the submission date; a reviewer will resolve it."
+    analyst: "Cost center {cost_center_id} inactive or not effective on {submission_date}."
+  - code: BUDGET_EXCEEDED
+    class: POLICY_VIOLATION
+    severity: SOFT
+    requester: "This claim exceeds the remaining budget of {cost_center_id}; finance will review it."
+    analyst: "Reservation {amount} makes available budget {available} negative on {budget_id}."
+  - code: CURRENCY_MISMATCH
+    class: DATA_QUALITY
+    severity: CORRECTABLE
+    requester: "Line {line_id} currency {line_currency} differs from the claim currency {claim_currency}."
+    analyst: "Line currency {line_currency} vs claim {claim_currency} vs employee {employee_currency}."
+  - code: POLICY_VERSION_EXPIRED
+    class: DATA_QUALITY
+    severity: SOFT
+    requester: "The claim references policy {policy_id}, which is not effective on {submission_date}."
+    analyst: "Referenced version {policy_id} not effective on {submission_date}; current is {current_policy_id}."
+  - code: POLICY_NOT_APPLICABLE
+    class: POLICY_VIOLATION
+    severity: HARD
+    requester: "No applicable policy exists for this request."
+    analyst: "No effective policy version for {family} on {submission_date}."
+  # --- routing ---
+  - code: NO_VALID_APPROVAL_PATH
+    class: NO_VALID_APPROVAL_PATH
+    severity: SOFT
+    requester: "No approver could be found for level {level}; a process owner will review the request."
+    analyst: "Level {level} unresolved for requester {employee_id} on {routing_date}."
+  - code: RULE_CONFLICT
+    class: RULE_CONFLICT
+    severity: SOFT
+    requester: "The approval rules for this request conflict; a process owner will review it."
+    analyst: "Rules {rule_ids} match with equal priority and different required levels."

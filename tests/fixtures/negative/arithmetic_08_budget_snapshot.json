@@ -1,0 +1,36 @@
+{
+  "description": "budget committed amount differs from the budget ledger",
+  "expected_checks": [
+    "V-ARITH-08"
+  ],
+  "fixture_id": "S17-08",
+  "scenario_id": "S17",
+  "tables": {
+    "cost_center_budget": [
+      {
+        "actual_amount": "0.00",
+        "budget_amount": "1000000.00",
+        "budget_period_end": "2026-12-31",
+        "budget_period_start": "2026-01-01",
+        "committed_amount": "5000.00",
+        "cost_center_budget_id": "CCB-CC-0001-2026",
+        "cost_center_id": "CC-0001",
+        "currency": "INR"
+      }
+    ],
+    "cost_center_transaction": [
+      {
+        "amount": "3000.00",
+        "correlation_id": "00000000-0000-5000-8000-000000000001",
+        "cost_center_budget_id": "CCB-CC-0001-2026",
+        "cost_center_id": "CC-0001",
+        "currency": "INR",
+        "expense_claim_id": "EXP-2026-000001",
+        "posted_at": "2026-03-02T09:00:00Z",
+        "transaction_id": "CCT-000000001",
+        "txn_date": "2026-03-02",
+        "txn_type": "RESERVATION"
+      }
+    ]
+  }
+}

@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from src.common.clock import SystemClock
 from src.data.dataset import TABLE_ORDER, Dataset, columns, sort_by_pk
 
-GENERATOR_VERSION = "0.3.0"
+GENERATOR_VERSION = "0.4.0"
 EXCLUDED_FROM_CHECKSUM = ("generated_at",)
 
 
@@ -42,7 +42,7 @@ def canonical_text(col: sa.Column, value) -> str | None:
     return str(value)
 
 
-def _json_value(col: sa.Column, value):
+def json_value(col: sa.Column, value):
     if value is None:
         return None
     if isinstance(col.type, sa.Boolean):
@@ -90,7 +90,18 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def write_dataset(dataset: Dataset, credentials: list[dict], out_dir: Path, meta: dict) -> dict:
+def write_dataset(dataset: Dataset, credentials: list[dict], out_dir: Path, meta: dict,
+                  extra_files=None) -> dict:
+    """Write the ops tables, then the manifest. `extra_files(out_dir) -> list[Path]` may write further files
+    (ground truth, validation report) that must also be checksummed in the manifest."""
+    written = write_tables(dataset, credentials, out_dir)
+    if extra_files is not None:
+        written += extra_files(out_dir)
+    return write_manifest(out_dir, {**meta, "row_counts": {name: len(dataset[name]) for name in TABLE_ORDER}},
+                          written)
+
+
+def write_tables(dataset: Dataset, credentials: list[dict], out_dir: Path) -> list[Path]:
     raw = out_dir / "raw"
     processed = out_dir / "processed"
     raw.mkdir(parents=True, exist_ok=True)
@@ -107,7 +118,7 @@ def write_dataset(dataset: Dataset, credentials: list[dict], out_dir: Path, meta
             for r in rows:
                 w.writerow(["" if (v := canonical_text(c, r[c.name])) is None else v for c in cols])
         json_path = raw / f"{name}.json"
-        payload = [{c.name: _json_value(c, r[c.name]) for c in cols} for r in rows]
+        payload = [{c.name: json_value(c, r[c.name]) for c in cols} for r in rows]
         json_path.write_text(json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n",
                              encoding="utf-8", newline="\n")
         written += [csv_path, json_path]
@@ -121,16 +132,25 @@ def write_dataset(dataset: Dataset, credentials: list[dict], out_dir: Path, meta
         for c in sorted(credentials, key=lambda c: c["user_id"]):
             w.writerow([c["user_id"], c["username"], c["password"], c["roles"]])
     written += [seed_path, cred_path]
+    return written
 
+
+def write_manifest(out_dir: Path, meta: dict, written: list[Path]) -> dict:
+    """manifest.json with SHA-256 per file. generated_at is the time the CONTENT was first generated: when an
+    existing manifest is identical apart from generated_at, the file is left untouched, so re-running the same
+    seed produces no change for git to report (ASM-050 still excludes generated_at from comparisons)."""
     manifest = {
         "generator_version": GENERATOR_VERSION,
         **meta,
-        "row_counts": {name: len(dataset[name]) for name in TABLE_ORDER},
         "files": {p.relative_to(out_dir).as_posix(): sha256_file(p) for p in sorted(written)},
-        "generated_at": SystemClock().now().strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n",
-                                           encoding="utf-8", newline="\n")
+    path = out_dir / "manifest.json"
+    if path.exists():
+        old = json.loads(path.read_text(encoding="utf-8"))
+        if {k: v for k, v in old.items() if k not in EXCLUDED_FROM_CHECKSUM} == json.loads(json.dumps(manifest)):
+            return old
+    manifest["generated_at"] = SystemClock().now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    path.write_text(json.dumps(manifest, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n")
     return manifest
 
 

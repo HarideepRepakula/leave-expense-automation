@@ -24,6 +24,12 @@ per_line_limit_usd:
 
 default_effective_start: 2025-01-01
 
+# Validation and detection parameters (docs/05 BR-EX-02, BR-SPLIT-01, ASM-019, ASM-041).
+detection:
+  max_line_age_days: 90             # BR-EX-02: line no older than 90 days before submission
+  split_window_days: 7              # BR-SPLIT-01: all submission dates within a 7-day window (max - min <= 6)
+  split_threshold_usd: "200.00"     # lowest expense routing band upper bound (ASM-019)
+
 # Families with more than one version (ASM-011). V2 raises the USD per-line base by 10% (ASM-P3-11).
 versioned:
   MEALS:

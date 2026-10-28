@@ -11,7 +11,17 @@
 | tests/data/ (Phase 3) | no | test_generator_baseline.py: exact volumes at full and starter scale, ID formats, PK uniqueness, FK resolution, hierarchy and authority structure, ledger = snapshot, validity of every leave request and expense claim; test_generator_reproducibility.py: two runs give identical row counts and SHA-256 per file (full and starter), a different seed changes the data, canonical CSV, stream independence |
 | tests/unit/ (Phase 3) | no | test_calendar_and_accrual.py: hand-built cases for business days, quantities, year split, accrual, annual grant, rounding, version resolution |
 
-Later phases add tests/unit, tests/integration, tests/api, tests/analytics, tests/validation, tests/evaluation, tests/reference and tests/fixtures/negative.
+| tests/data/test_anomalies_and_ground_truth.py (Phase 4) | no | exact volumes after S5, planned = actual per scenario, 176 planted anomaly records (56 leave + 120 expense), one planted scenario per record, labels agree with expectations, natural labels complete, carry-ins (8+ claims at L5, natural split pair is_planted=false, S19 = G7 requester), legacy USAGE reconciles, receipts and ids consistent after edits, oracle accrual = ledger |
+| tests/reference/ (Phase 4) | no | hand-built organisation: routing bands, G7 covering L1+L2 in one step, dedupe, substitution, delegation, rule-conflict fixtures, split window and threshold, half-day overlap, outcome precedence, accrual agreement |
+| tests/validation/ (Phase 4) | no | the real export passes all 21 checks (M1 = M2 = 0, M3 = 1.0), reader round-trip, ground-truth files in the manifest, every negative fixture caught by its check |
+| tests/test_ground_truth_isolation.py, tests/test_reference_independence.py (Phase 4) | no | no operational module imports or names ground truth; the oracle shares no code with services/data; only the S9 stage uses the oracle |
+| tests/fixtures/negative/ (Phase 4) | no | 8 lifecycle (S16), 8 arithmetic (S17), 3 structural, 2 rule-conflict (S20) fixtures; built by scripts/build_negative_fixtures.py |
+
+tests/db/test_generator_load.py (Phase 4): lea_test has the test-only EXCLUDE constraint (amendment A3), so loading
+the dataset with the planted S02 overlaps must FAIL there (tested); the count test lifts that one constraint for its
+own load and restores it afterwards. It also loads the ground_truth schema.
+
+Later phases add tests/integration, tests/api, tests/analytics and tests/evaluation.
 
 ## Commands (PowerShell, venv active, from the project root)
 

@@ -1,0 +1,14 @@
+# Line endings (carried into Phase 4). The generator writes canonical files with LF only and their SHA-256 is
+# part of the reproducibility check (docs/07 section 10), so git must never convert them to CRLF on checkout.
+* text=auto eol=lf
+
+# Generated canonical data: keep LF, and do not show line diffs for the large generated files.
+data/**/*.csv  text eol=lf -diff
+data/**/*.json text eol=lf
+data/**/*.sql  text eol=lf -diff
+
+# Binary
+*.png  binary
+*.jpg  binary
+*.pdf  binary
+*.xlsx binary

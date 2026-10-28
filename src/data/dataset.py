@@ -24,6 +24,7 @@ TABLE_ORDER: list[str] = [
     "leave_policy",
     "expense_policy",
     "approval_rule",
+    "exception_code",
     "role",
     "application_user",
     "user_role",

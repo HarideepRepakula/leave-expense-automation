@@ -18,7 +18,8 @@ from src.data.stages import GenParams
 from src.services.leave_balance_service import accrual_schedule
 
 CORRELATION_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "urn:lea:generator")
-TXN_ORDER = {LeaveTxnType.OPENING.value: 0, LeaveTxnType.CARRY_FORWARD.value: 1, LeaveTxnType.ACCRUAL.value: 2}
+TXN_ORDER = {LeaveTxnType.OPENING.value: 0, LeaveTxnType.CARRY_FORWARD.value: 1, LeaveTxnType.ACCRUAL.value: 2,
+             LeaveTxnType.USAGE.value: 3}
 ZERO = Decimal("0.0")
 
 
@@ -70,8 +71,14 @@ def build_balances(p: GenParams, streams: RngStreams, employees: list[dict], pol
                     "last_recalculated_at": as_of_ts,
                 })
 
-    # LBT counters per year of txn_date, after a stable sort (docs/07 section 3).
-    postings.sort(key=lambda r: (r["txn_date"], r["leave_balance_id"], TXN_ORDER[r["txn_type"]]))
+    return {"leave_balance": snapshots, "leave_balance_transaction": number_transactions(postings)}
+
+
+def number_transactions(postings: list[dict]) -> list[dict]:
+    """LBT counters per year of txn_date, after a stable sort (docs/07 section 3). Used by S2 and again by S5
+    after legacy USAGE postings are added, so ledger ids always follow date order."""
+    postings = sorted(postings, key=lambda r: (r["txn_date"], r["leave_balance_id"], TXN_ORDER[r["txn_type"]],
+                                               r.get("leave_request_id") or ""))
     counters: dict[int, int] = {}
     transactions = []
     for r in postings:
@@ -81,7 +88,7 @@ def build_balances(p: GenParams, streams: RngStreams, employees: list[dict], pol
         transactions.append({
             "transaction_id": txn_id,
             "leave_balance_id": r["leave_balance_id"],
-            "leave_request_id": None,
+            "leave_request_id": r.get("leave_request_id"),
             "txn_type": r["txn_type"],
             "quantity": r["quantity"],
             "txn_date": r["txn_date"],
@@ -89,7 +96,7 @@ def build_balances(p: GenParams, streams: RngStreams, employees: list[dict], pol
             "reason": r["reason"],
             "correlation_id": uuid.uuid5(CORRELATION_NAMESPACE, txn_id),
         })
-    return {"leave_balance": snapshots, "leave_balance_transaction": transactions}
+    return transactions
 
 
 def ledger_index(transactions: list[dict]) -> dict[str, list[tuple[date, Decimal]]]:

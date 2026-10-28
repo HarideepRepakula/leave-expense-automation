@@ -1,0 +1,77 @@
+illustrative_synthetic: true
+fixture_id: S20-02
+scenario_id: S20
+description: leave rule set with two equal-priority rules of different outcome
+expected: RULE_CONFLICT
+probe:
+  request_type: LEAVE
+  measure: '3.0'
+effective_start: '2025-01-01'
+rules:
+- id: RULE-E-001
+  request_type: EXPENSE
+  max_amount_usd: '200.00'
+  levels:
+  - L1
+  priority: 10
+- id: RULE-E-002
+  request_type: EXPENSE
+  min_amount_usd: '200.00'
+  max_amount_usd: '1000.00'
+  levels:
+  - L1
+  - L2
+  priority: 10
+- id: RULE-E-003
+  request_type: EXPENSE
+  min_amount_usd: '1000.00'
+  max_amount_usd: '5000.00'
+  levels:
+  - L1
+  - L2
+  - L4
+  priority: 10
+- id: RULE-E-004
+  request_type: EXPENSE
+  min_amount_usd: '5000.00'
+  levels:
+  - L1
+  - L2
+  - L4
+  - L5
+  priority: 10
+- id: RULE-L-001
+  request_type: LEAVE
+  max_days: '5.0'
+  levels:
+  - L1
+  priority: 10
+- id: RULE-L-002
+  request_type: LEAVE
+  min_days: '5.0'
+  max_days: '10.0'
+  levels:
+  - L1
+  - L2
+  priority: 10
+- id: RULE-L-003
+  request_type: LEAVE
+  min_days: '10.0'
+  levels:
+  - L1
+  - L3
+  priority: 10
+- id: RULE-L-004
+  request_type: LEAVE
+  category_or_leave_type: UNPAID
+  levels:
+  - L1
+  - L3
+  priority: 20
+- id: RULE-L-005
+  request_type: LEAVE
+  max_days: '5.0'
+  levels:
+  - L1
+  - L3
+  priority: 10

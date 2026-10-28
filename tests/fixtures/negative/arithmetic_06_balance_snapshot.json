@@ -1,0 +1,36 @@
+{
+  "description": "leave balance snapshot differs from the ledger",
+  "expected_checks": [
+    "V-ARITH-05"
+  ],
+  "fixture_id": "S17-06",
+  "scenario_id": "S17",
+  "tables": {
+    "leave_balance": [
+      {
+        "accrued": "10.0",
+        "adjustments": "0.0",
+        "available_balance": "10.0",
+        "employee_id": "EMP-000001",
+        "last_recalculated_at": "2026-10-22T00:00:00Z",
+        "leave_balance_id": "LBAL-EMP-000001-LPOL-ANNUAL-IN-V1-2026",
+        "leave_policy_id": "LPOL-ANNUAL-IN-V1",
+        "leave_year": "2026",
+        "opening_balance": "0.0",
+        "used": "0.0"
+      }
+    ],
+    "leave_balance_transaction": [
+      {
+        "correlation_id": "00000000-0000-5000-8000-000000000001",
+        "leave_balance_id": "LBAL-EMP-000001-LPOL-ANNUAL-IN-V1-2026",
+        "posted_at": "2026-01-01T00:00:00Z",
+        "quantity": "8.0",
+        "reason": "Monthly accrual",
+        "transaction_id": "LBT-2026-000001",
+        "txn_date": "2026-01-01",
+        "txn_type": "ACCRUAL"
+      }
+    ]
+  }
+}

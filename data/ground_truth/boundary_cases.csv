@@ -1,0 +1,41 @@
+case_id,record_type,record_id,boundary_type,expected_outcome
+GTB-0001,EXPENSE,EXP-2025-000055,BC-01:EXPENSE_AT_200_USD,Routes L1 (exactly 200.00 USD; bands are upper-inclusive)
+GTB-0002,EXPENSE,EXP-2025-000277,BC-01:EXPENSE_AT_200_USD,Routes L1 (exactly 200.00 USD; bands are upper-inclusive)
+GTB-0003,EXPENSE,EXP-2026-000363,BC-01:EXPENSE_AT_200_USD,Routes L1 (exactly 200.00 USD; bands are upper-inclusive)
+GTB-0004,EXPENSE,EXP-2025-000007,BC-02:EXPENSE_AT_1000_USD,Routes L1+L2 (exactly 1000.00 USD; bands are upper-inclusive)
+GTB-0005,EXPENSE,EXP-2026-000130,BC-02:EXPENSE_AT_1000_USD,Routes L1+L2 (exactly 1000.00 USD; bands are upper-inclusive)
+GTB-0006,EXPENSE,EXP-2026-000242,BC-02:EXPENSE_AT_1000_USD,Routes L1+L2 (exactly 1000.00 USD; bands are upper-inclusive)
+GTB-0007,EXPENSE,EXP-2025-000448,BC-02:EXPENSE_AT_5000_USD,Routes L1+L2+L4 (exactly 5000.00 USD; bands are upper-inclusive)
+GTB-0008,EXPENSE,EXP-2025-000497,BC-02:EXPENSE_AT_5000_USD,Routes L1+L2+L4 (exactly 5000.00 USD; bands are upper-inclusive)
+GTB-0009,EXPENSE,EXP-2025-000501,BC-02:EXPENSE_AT_5000_USD,Routes L1+L2+L4 (exactly 5000.00 USD; bands are upper-inclusive)
+GTB-0010,LEAVE,LVE-2025-000276,BC-03:LEAVE_QUANTITY_10,Routes L1+L2 (quantity exactly 10.0; upper-inclusive)
+GTB-0011,LEAVE,LVE-2025-000326,BC-03:LEAVE_QUANTITY_10,Routes L1+L2 (quantity exactly 10.0; upper-inclusive)
+GTB-0012,LEAVE,LVE-2026-000005,BC-03:LEAVE_QUANTITY_10,Routes L1+L2 (quantity exactly 10.0; upper-inclusive)
+GTB-0013,LEAVE,LVE-2025-000208,BC-03:LEAVE_QUANTITY_5,Routes L1 (quantity exactly 5.0; upper-inclusive)
+GTB-0014,LEAVE,LVE-2026-000176,BC-03:LEAVE_QUANTITY_5,Routes L1 (quantity exactly 5.0; upper-inclusive)
+GTB-0015,LEAVE,LVE-2026-000195,BC-03:LEAVE_QUANTITY_5,Routes L1 (quantity exactly 5.0; upper-inclusive)
+GTB-0016,LEAVE,LVE-2025-000180,BC-04:LEAVE_EQUALS_AVAILABLE_BALANCE,"Approved; quantity 10.0 equals the available balance, which becomes 0"
+GTB-0017,LEAVE,LVE-2025-000219,BC-04:LEAVE_EQUALS_AVAILABLE_BALANCE,"Approved; quantity 10.0 equals the available balance, which becomes 0"
+GTB-0018,LEAVE,LVE-2025-000299,BC-04:LEAVE_EQUALS_AVAILABLE_BALANCE,"Approved; quantity 12.5 equals the available balance, which becomes 0"
+GTB-0019,EXPENSE,EXP-2025-000196,BC-05:EXPENSE_ON_EMPLOYMENT_END,Valid: line dated exactly on the employment end date 2025-04-14 (inclusive bounds)
+GTB-0020,EXPENSE,EXP-2025-000305,BC-05:EXPENSE_ON_EMPLOYMENT_END,Valid: line dated exactly on the employment end date 2025-06-27 (inclusive bounds)
+GTB-0021,EXPENSE,EXP-2026-000233,BC-05:EXPENSE_ON_EMPLOYMENT_END,Valid: line dated exactly on the employment end date 2026-05-07 (inclusive bounds)
+GTB-0022,EXPENSE,EXP-2025-000075,BC-05:EXPENSE_ON_EMPLOYMENT_START,Valid: line dated exactly on the employment start date 2025-01-29 (inclusive bounds)
+GTB-0023,EXPENSE,EXP-2026-000245,BC-05:EXPENSE_ON_EMPLOYMENT_START,Valid: line dated exactly on the employment start date 2026-04-27 (inclusive bounds)
+GTB-0024,EXPENSE,EXP-2026-000425,BC-05:EXPENSE_ON_EMPLOYMENT_START,Valid: line dated exactly on the employment start date 2026-08-10 (inclusive bounds)
+GTB-0025,LEAVE,LVE-2025-000336,BC-06:LEAVE_STARTS_ON_HOLIDAY,Holiday 2025-10-20 excluded: quantity 1.0 business days; valid
+GTB-0026,LEAVE,LVE-2025-000388,BC-06:LEAVE_STARTS_ON_HOLIDAY,Holiday 2025-12-25 excluded: quantity 1.0 business days; valid
+GTB-0027,LEAVE,LVE-2026-000378,BC-06:LEAVE_STARTS_ON_HOLIDAY,Holiday 2026-11-26 excluded: quantity 1.0 business days; valid
+GTB-0028,EXPENSE,EXP-2025-000517,BC-07:SUBMITTED_ON_POLICY_EFFECTIVE_END,Policy XPOL-MEALS-GB-V1 still applicable on its effective_end (inclusive)
+GTB-0029,EXPENSE,EXP-2025-000518,BC-07:SUBMITTED_ON_POLICY_EFFECTIVE_END,Policy XPOL-MEALS-IN-V1 still applicable on its effective_end (inclusive)
+GTB-0030,EXPENSE,EXP-2025-000520,BC-07:SUBMITTED_ON_POLICY_EFFECTIVE_END,Policy XPOL-MEALS-GB-V1 still applicable on its effective_end (inclusive)
+GTB-0031,EXPENSE,EXP-2025-000094,BC-08:LINE_AT_RECEIPT_THRESHOLD,"Receipt required (>= threshold, inclusive); receipt present, no exception (line 1 = 2080.00 INR)"
+GTB-0032,EXPENSE,EXP-2025-000153,BC-08:LINE_AT_RECEIPT_THRESHOLD,"Receipt required (>= threshold, inclusive); receipt present, no exception (line 8 = 2080.00 INR)"
+GTB-0033,EXPENSE,EXP-2025-000411,BC-08:LINE_AT_RECEIPT_THRESHOLD,"Receipt required (>= threshold, inclusive); receipt present, no exception (line 1 = 20.00 GBP)"
+GTB-0034,EXPENSE,EXP-2025-000404,BC-09:LINE_AT_PER_LINE_LIMIT,"Not a breach (<= per-line limit); no exception, nothing capped (line 1 = 1500.00 USD)"
+GTB-0035,EXPENSE,EXP-2026-000120,BC-09:LINE_AT_PER_LINE_LIMIT,"Not a breach (<= per-line limit); no exception, nothing capped (line 1 = 6850.00 INR)"
+GTB-0036,EXPENSE,EXP-2026-000209,BC-09:LINE_AT_PER_LINE_LIMIT,"Not a breach (<= per-line limit); no exception, nothing capped (line 2 = 6850.00 INR)"
+GTB-0037,EXPENSE,EXP-2025-000294,BC-10:SPLIT_PAIR_AT_THRESHOLD,"Flagged SPLIT_CLAIM_SUSPECTED (group sum exactly 200.00 USD, >=)"
+GTB-0038,EXPENSE,EXP-2025-000306,BC-10:SPLIT_PAIR_AT_THRESHOLD,"Flagged SPLIT_CLAIM_SUSPECTED (group sum exactly 200.00 USD, >=)"
+GTB-0039,EXPENSE,EXP-2026-000302,BC-10:SPLIT_PAIR_AT_THRESHOLD,"Flagged SPLIT_CLAIM_SUSPECTED (group sum exactly 200.00 USD, >=)"
+GTB-0040,EXPENSE,EXP-2026-000309,BC-10:SPLIT_PAIR_AT_THRESHOLD,"Flagged SPLIT_CLAIM_SUSPECTED (group sum exactly 200.00 USD, >=)"

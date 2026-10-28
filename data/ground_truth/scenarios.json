@@ -1,0 +1,289 @@
+[
+  {
+    "actual_count": 3,
+    "description": "Boundary record BC-01 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 3,
+    "scenario_id": "BC-01"
+  },
+  {
+    "actual_count": 6,
+    "description": "Boundary record BC-02 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 6,
+    "scenario_id": "BC-02"
+  },
+  {
+    "actual_count": 6,
+    "description": "Boundary record BC-03 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 6,
+    "scenario_id": "BC-03"
+  },
+  {
+    "actual_count": 3,
+    "description": "Boundary record BC-04 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 3,
+    "scenario_id": "BC-04"
+  },
+  {
+    "actual_count": 6,
+    "description": "Boundary record BC-05 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 6,
+    "scenario_id": "BC-05"
+  },
+  {
+    "actual_count": 3,
+    "description": "Boundary record BC-06 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 3,
+    "scenario_id": "BC-06"
+  },
+  {
+    "actual_count": 3,
+    "description": "Boundary record BC-07 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 3,
+    "scenario_id": "BC-07"
+  },
+  {
+    "actual_count": 3,
+    "description": "Boundary record BC-08 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 3,
+    "scenario_id": "BC-08"
+  },
+  {
+    "actual_count": 3,
+    "description": "Boundary record BC-09 (docs/02 section 6)",
+    "issue_type": "BOUNDARY_CASE",
+    "planned_count": 3,
+    "scenario_id": "BC-09"
+  },
+  {
+    "actual_count": 4,
+    "description": "Split pair at exactly the threshold (boundary)",
+    "issue_type": "SPLIT_CLAIM_SUSPECTED",
+    "planned_count": 4,
+    "scenario_id": "BC-10"
+  },
+  {
+    "actual_count": 8,
+    "description": "Negative leave balance on a policy that forbids it (legacy approval)",
+    "issue_type": "NEGATIVE_BALANCE_UNPERMITTED",
+    "planned_count": 8,
+    "scenario_id": "S01"
+  },
+  {
+    "actual_count": 8,
+    "description": "Negative balance permitted by policy (control, expected negative)",
+    "issue_type": "PERMITTED_NEGATIVE_BALANCE",
+    "planned_count": 8,
+    "scenario_id": "S01b"
+  },
+  {
+    "actual_count": 16,
+    "description": "Overlapping approved leave for the same employee (pairs)",
+    "issue_type": "OVERLAPPING_APPROVED_LEAVE",
+    "planned_count": 16,
+    "scenario_id": "S02"
+  },
+  {
+    "actual_count": 12,
+    "description": "Insufficient leave balance at submission",
+    "issue_type": "INSUFFICIENT_BALANCE",
+    "planned_count": 12,
+    "scenario_id": "S03"
+  },
+  {
+    "actual_count": 44,
+    "description": "Leave spanning weekends and public holidays (control; planted + natural, at least the planned total)",
+    "issue_type": "WEEKEND_HOLIDAY_SPAN",
+    "planned_count": 40,
+    "scenario_id": "S04"
+  },
+  {
+    "actual_count": 10,
+    "description": "Missing expense receipt",
+    "issue_type": "MISSING_RECEIPT",
+    "planned_count": 10,
+    "scenario_id": "S05"
+  },
+  {
+    "actual_count": 16,
+    "description": "Duplicate receipt hash, same employee (pairs)",
+    "issue_type": "DUPLICATE_RECEIPT_SELF",
+    "planned_count": 16,
+    "scenario_id": "S06a"
+  },
+  {
+    "actual_count": 16,
+    "description": "Duplicate receipt hash, different employees (pairs)",
+    "issue_type": "DUPLICATE_RECEIPT_CROSS_EMPLOYEE",
+    "planned_count": 16,
+    "scenario_id": "S06b"
+  },
+  {
+    "actual_count": 8,
+    "description": "Per-line limit breach",
+    "issue_type": "LINE_LIMIT_EXCEEDED",
+    "planned_count": 8,
+    "scenario_id": "S07a"
+  },
+  {
+    "actual_count": 8,
+    "description": "Per-claim limit breach",
+    "issue_type": "CLAIM_LIMIT_EXCEEDED",
+    "planned_count": 8,
+    "scenario_id": "S07b"
+  },
+  {
+    "actual_count": 8,
+    "description": "Expense dated outside employment",
+    "issue_type": "EXPENSE_OUTSIDE_EMPLOYMENT",
+    "planned_count": 8,
+    "scenario_id": "S08"
+  },
+  {
+    "actual_count": 18,
+    "description": "Suspected split claims (6 pairs + 2 triples)",
+    "issue_type": "SPLIT_CLAIM_SUSPECTED",
+    "planned_count": 18,
+    "scenario_id": "S09"
+  },
+  {
+    "actual_count": 8,
+    "description": "Missing cost center",
+    "issue_type": "MISSING_COST_CENTER",
+    "planned_count": 8,
+    "scenario_id": "S10"
+  },
+  {
+    "actual_count": null,
+    "description": "Approval attempt by the requester (rows built in Phase 7)",
+    "issue_type": "SELF_APPROVAL_ATTEMPT",
+    "planned_count": 8,
+    "scenario_id": "S11"
+  },
+  {
+    "actual_count": null,
+    "description": "Unauthorised approver attempt (rows built in Phase 7)",
+    "issue_type": "UNAUTHORIZED_APPROVER_ATTEMPT",
+    "planned_count": 8,
+    "scenario_id": "S12"
+  },
+  {
+    "actual_count": null,
+    "description": "Duplicate reimbursement attempt (rows built in Phase 8)",
+    "issue_type": "DUPLICATE_REIMBURSEMENT_ATTEMPT",
+    "planned_count": 8,
+    "scenario_id": "S13"
+  },
+  {
+    "actual_count": 771,
+    "description": "Multi-level approval route (natural control; expected at least the planned count)",
+    "issue_type": "MULTI_LEVEL_ROUTE",
+    "planned_count": 150,
+    "scenario_id": "S14"
+  },
+  {
+    "actual_count": 8,
+    "description": "Claims above 5,000 USD reaching the L5 level (control)",
+    "issue_type": "MULTI_LEVEL_ROUTE",
+    "planned_count": 8,
+    "scenario_id": "S14-L5"
+  },
+  {
+    "actual_count": 8,
+    "description": "Expired policy version referenced",
+    "issue_type": "POLICY_VERSION_EXPIRED",
+    "planned_count": 8,
+    "scenario_id": "S15"
+  },
+  {
+    "actual_count": 8,
+    "description": "Invalid lifecycle transition (negative fixtures)",
+    "issue_type": "INVALID_LIFECYCLE_TRANSITION",
+    "planned_count": 8,
+    "scenario_id": "S16"
+  },
+  {
+    "actual_count": 8,
+    "description": "Arithmetic reconciliation failure (negative fixtures)",
+    "issue_type": "CLAIM_TOTAL_MISMATCH",
+    "planned_count": 8,
+    "scenario_id": "S17"
+  },
+  {
+    "actual_count": null,
+    "description": "Repeated submission, idempotent replay (rows built in Phase 7)",
+    "issue_type": "REPEATED_SUBMISSION",
+    "planned_count": 8,
+    "scenario_id": "S18"
+  },
+  {
+    "actual_count": 4,
+    "description": "No valid approval path, expense (G7 requester)",
+    "issue_type": "NO_VALID_APPROVAL_PATH",
+    "planned_count": 4,
+    "scenario_id": "S19-E"
+  },
+  {
+    "actual_count": 4,
+    "description": "No valid approval path, leave (G7 requester)",
+    "issue_type": "NO_VALID_APPROVAL_PATH",
+    "planned_count": 4,
+    "scenario_id": "S19-L"
+  },
+  {
+    "actual_count": 2,
+    "description": "Rule conflict (negative fixtures)",
+    "issue_type": "RULE_CONFLICT",
+    "planned_count": 2,
+    "scenario_id": "S20"
+  },
+  {
+    "actual_count": 8,
+    "description": "Budget exceeded on CC-0024",
+    "issue_type": "BUDGET_EXCEEDED",
+    "planned_count": 8,
+    "scenario_id": "S21"
+  },
+  {
+    "actual_count": 8,
+    "description": "Overlap with pending leave",
+    "issue_type": "OVERLAPPING_PENDING_LEAVE",
+    "planned_count": 8,
+    "scenario_id": "S22"
+  },
+  {
+    "actual_count": 8,
+    "description": "Sick leave above 3 days without certificate",
+    "issue_type": "MEDICAL_CERT_REQUIRED",
+    "planned_count": 8,
+    "scenario_id": "S23"
+  },
+  {
+    "actual_count": 8,
+    "description": "Delegated L1 route (control)",
+    "issue_type": "DELEGATED_ROUTE",
+    "planned_count": 8,
+    "scenario_id": "S24"
+  },
+  {
+    "actual_count": null,
+    "description": "Technical payment failure (Phase 8; 5 percent of first payment attempts, count not fixed in advance)",
+    "issue_type": "PROCESSING_FAILURE",
+    "planned_count": 0,
+    "scenario_id": "S25"
+  },
+  {
+    "actual_count": 8,
+    "description": "Line currency differs from claim currency",
+    "issue_type": "CURRENCY_MISMATCH",
+    "planned_count": 8,
+    "scenario_id": "S26"
+  }
+]
