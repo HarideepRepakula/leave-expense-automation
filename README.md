@@ -4,7 +4,13 @@ A deterministic, rules-driven workflow engine for employee leave requests and ex
 seeded synthetic-data generator, separate ground truth, an evaluation suite, a FastAPI backend and a
 Streamlit dashboard. All data is synthetic. All policy values are illustrative and labelled as assumptions.
 
-Status: Phase 2 (data dictionary, database schema, migrations). See PROGRESS.md.
+Status: Phase 3 (synthetic master data and transaction generator). See PROGRESS.md.
+
+Generate the full baseline and load it into lea_dev (details in docs/11_generation_guide.md):
+
+```powershell
+python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+```
 
 ## Documents
 
@@ -13,6 +19,7 @@ Status: Phase 2 (data dictionary, database schema, migrations). See PROGRESS.md.
 | docs/00_original_spec.md, docs/01_amendments.md | source of truth (amendments win on conflict) |
 | docs/02 .. docs/09 | Phase 1: traceability, architecture, entities, rules, lifecycle, generation, evaluation, assumptions |
 | docs/10_data_dictionary.md | Phase 2: every table and field |
+| docs/11_generation_guide.md | Phase 3: generator commands, outputs, reproducibility |
 | docs/14_setup.md, docs/15_testing.md | how to set up and test |
 
 ## Quick start (Windows PowerShell)

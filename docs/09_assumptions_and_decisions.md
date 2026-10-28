@@ -186,3 +186,47 @@ Three sections: assumptions (ASM), open ambiguities with a proposed default (AMB
 ## 6. Conflicts between spec and amendments
 
 Listed with resolutions in docs/02 section 7 (CF-01..CF-11). All resolved in favour of the amendments as CLAUDE.md requires; please confirm.
+
+## 7. Phase 3 additions (generator), awaiting "APPROVED PHASE 3"
+
+### 7.1 Assumptions (illustrative synthetic; values live in config/*.yaml)
+
+| ID | Assumption |
+|---|---|
+| ASM-P3-01 | Department shares of non-structural employees: Engineering 25%, Sales 18%, Finance 10%, HR 7%, Operations 15%, Marketing 8%, IT 10%, Legal 7%. |
+| ASM-P3-02 | Department order DEPT-01..08 = Engineering, Sales, Finance, HR, Operations, Marketing, IT, Legal; cost centers numbered department-major then IN, US, GB, so CC-0024 = Legal GB as ASM-016 requires. Cost centers effective from 2015-01-01 (covers the earliest employment start). Budget: USD drawn uniform 50,000-400,000, rounded to whole thousands, converted at that year's Jan 1 rate, 2 dp. |
+| ASM-P3-03 | Structural roles are fixed first: one G7 (heads Finance, root of the tree), one G6 head per other department (reports to the G7), one G5 finance controller per country in Finance. They are hired 2015-01-01..2024-12-31 and never terminated or on leave of absence. Grade quotas use largest remainder with minimums G6 >= 7 and G5 >= 3 (only binding at starter scale). A manager is in the same department with a strictly higher grade (closest grade preferred), was employed by max(report start, 2025-01-01) and had not left before the report joined; fallback = department head, then the G7. |
+| ASM-P3-04 | Job titles: "<grade title>, <department>" with G1 Associate .. G6 Senior Manager; "Head of <department>"; "Finance Controller (<country>)"; G7 "Chief Financial Officer". Email = first.last.<6-digit employee number>@example.test. |
+| ASM-P3-05 | Submission timestamps: dates in the window with weekday weight 1.0 and weekend weight 0.4; hour 08-18 UTC, minute uniform; always strictly before the as-of date. |
+| ASM-P3-06 | Leave type draw weights: IN ANNUAL 0.50, SICK 0.25, CASUAL 0.15, UNPAID 0.10; US and GB ANNUAL 0.60, SICK 0.30, UNPAID 0.10. Business-day count weighted decay^(N-min) (ANNUAL 0.82, CASUAL 0.60, SICK 0.65, UNPAID 0.88); half-day flag probability per end ANNUAL 0.10, CASUAL 0.25, SICK 0.15, UNPAID 0. Start = submission + offset (1..60 days; SICK -3..60, the literal reading of ASM-042), moved to the next business day; end = N-th business day. |
+| ASM-P3-07 | Expense primary category weights TRAVEL 0.20, MEALS 0.30, ACCOMMODATION 0.15, OFFICE_SUPPLIES 0.15, TRAINING 0.08, CLIENT_ENTERTAINMENT 0.12; each line keeps that category with probability 0.70, else another category uniformly. Line amounts log-uniform inside the ASM-041 USD ranges, converted at the submission-date rate. Latest line date = submission - 1..30 days; other lines uniform in [max(submission - 90, employment start), latest]. quantity and unit_amount are NULL on baseline lines. |
+| ASM-P3-08 | Every line at or above the receipt threshold carries a receipt; lines below it carry one with probability 0.60. |
+| ASM-P3-09 | Merchant = Faker company() for the employee's locale; description "<label> - <merchant>" with labels per category in config; receipt number "INV-" + 8 digits. |
+| ASM-P3-10 | Simulated users: username = employee email; synthetic 12-character passwords from the users stream; bcrypt cost 4 with a salt drawn from the users stream (deterministic so checksums are reproducible; synthetic dev credentials only, never real security). Plain passwords are written to data/processed/dev_credentials.csv, which is git-ignored. Terminated employees' users are inactive. OPS_ANALYST count scales with employees (5 at 400, minimum 1). |
+| ASM-P3-11 | MEALS V2 per-line limit = USD base x 1.10, converted at the 2025-01-01 reference rate and rounded like V1 (US: 82.50 -> 83.00). |
+| ASM-P3-12 | Holiday names are illustrative labels for the ASM-005 dates. |
+| ASM-P3-13 | No leave ends after 2026-12-31 (no 2027 balances exist). |
+| ASM-P3-14 | SICK annual grant for a joiner = entitlement x remaining days of the year / days in the year, rounded down to 0.5, dated on the joining date. MONTHLY joiner pro-rating applies to the already-rounded monthly amount. |
+| ASM-P3-15 | One cost center assignment per employee covering the whole employment (no transfers in the baseline). |
+| ASM-P3-16 | Delegations: count scales with employees (10 at 400, minimum 1); approver = a manager (not the G7) employed and active for the whole window; delegate = a same-grade peer in the department, else the approver's own manager; 5-20 days inside the window. |
+| ASM-P3-17 | Baseline medical_cert_flag is true exactly when a SICK request exceeds 3.0 days. DRAFT requests (about 1%) take their ID year from their creation timestamp. |
+| ASM-P3-18 | Timestamps: master rows created_at = 2024-12-31T00:00:00Z (docs/07 section 6, also for later hires); ledger posted_at = txn_date 00:00 UTC; leave_balance.last_recalculated_at = as-of date 00:00 UTC; ledger correlation_id = UUIDv5 of the transaction id. |
+
+### 7.2 Decisions
+
+| ID | Decision | Alternatives considered |
+|---|---|---|
+| DEC-37 | Three pure rule functions are brought forward from Phases 5-6 into src/services (calendar_service: business days and quantities; leave_balance_service.accrual_schedule; policy_resolver.resolve_version) so the generator never re-implements a rule (DEC-01, RK-01). Phases 5-6 extend them with the DB-backed services and full test matrices. | Duplicate the rules in src/data (rejected: two implementations); leave business_day_count etc. empty (impossible: NOT NULL columns). |
+| DEC-38 | `--load` replaces the lea_dev ops data: TRUNCATE all ops tables and insert in one transaction, using DATABASE_URL (schema owner), refusing any database other than lea_dev or *_test. lea_app cannot truncate append-only tables, by design. ground_truth is untouched. | Load through lea_app with DELETE (blocked by append-only triggers); incremental upsert. |
+| DEC-39 | JSON export renders decimals and timestamps as strings (exact, canonical); booleans and integers stay native. CSV renders decimals with the column's scale. | Decimals as JSON numbers (float formatting is not canonical). |
+| DEC-40 | Generator dependencies are pinned to exact versions (numpy 2.2.6, Faker 37.4.0, PyYAML 6.0.2, bcrypt 4.3.0), because a Faker or numpy upgrade can change drawn values and therefore checksums. | Ranges (would silently break M13 after an upgrade). |
+| DEC-41 | Phase 3 data is a valid baseline only: re-draw (not repair) any draw that would overlap, exceed the balance at submission, leave employment, exceed the unpaid cap, exceed a policy limit, or come from the G7. Anomalies are planted only in Phase 4 (docs/07 section 7). | Generate and then repair records (harder to reason about); allow natural violations. |
+
+### 7.3 Open ambiguities found in Phase 3 (proposed default implemented; please confirm or change)
+
+| ID | Ambiguity | Proposed default |
+|---|---|---|
+| AMB-P3-01 | Which workflow state do generated requests have before the Phase 7 engine exists? | SUBMITTED (about 1% DRAFT), exception_class NONE, validation fields empty (claim policy id, FX, USD total NULL; lines PENDING). Stage S6 in Phase 7 replaces them with real outcomes. |
+| AMB-P3-02 | Requests that cross into the next leave year: at submission the next year has no posted accrual or carry-forward yet, so under BR-LBAL-07/08 any ANNUAL/SICK/CASUAL cross-year request fails INSUFFICIENT_BALANCE. ASM-042 expected about 3% cross-year requests. | Keep the rule as written (posted ledger only). Baseline cross-year requests are therefore UNPAID only (1 of 800 in the full run). Alternative: count the next year's scheduled Jan 1 accrual/grant as available for the next-year portion (a rule change for Phase 5). |
+| AMB-P3-03 | Direct reports of the G7 have no skip-level manager. 30 employees report to the G7 (the 7 department heads among them); 15 leave and 49 expense baseline requests from them need L2. docs/05 section 5.4 would make all of them NO_VALID_APPROVAL_PATH. | Proposed for Phase 7 (not implemented in Phase 3): when L1 is the root (G7), the L2 requirement is met by the G7 (one step at the higher level, like the ASM-030 dedupe rule); NO_VALID_APPROVAL_PATH stays for G7 requesters and broken chains (S19). Until decided, Phase 4 ground truth would label these 64 as natural NO_VALID_APPROVAL_PATH. |
+| AMB-P3-04 | Rejection sampling shifts the realised leave type mix (full run: ANNUAL 391 / SICK 252 / UNPAID 98 / CASUAL 59, i.e. ANNUAL 49% vs a drawn ~56%), because ANNUAL draws fail the balance guard more often. | Accept and document; alternative is to re-draw dates within the same type. |

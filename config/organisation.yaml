@@ -1,0 +1,25 @@
+# Departments and cost centers (ASM-015, ASM-016, DEC-15, DEC-17). Illustrative synthetic.
+illustrative_synthetic: true
+
+# Department order fixes DEPT ids and cost center numbering (dept-major, countries IN, US, GB).
+# Legal is placed last so that CC-0024 = Legal-GB, as ASM-016 requires (ASM-P3-02).
+departments:
+  - {id: DEPT-01, name: Engineering}
+  - {id: DEPT-02, name: Sales}
+  - {id: DEPT-03, name: Finance}
+  - {id: DEPT-04, name: HR}
+  - {id: DEPT-05, name: Operations}
+  - {id: DEPT-06, name: Marketing}
+  - {id: DEPT-07, name: IT}
+  - {id: DEPT-08, name: Legal}
+
+cost_center_countries: [IN, US, GB]
+cost_center_effective_from: 2015-01-01     # ASM-P3-02: covers the earliest employment start
+
+budgets:                                   # ASM-016
+  years: [2025, 2026]
+  usd_min: 50000
+  usd_max: 400000
+  usd_round_to: 1000                       # ASM-P3-02 drawn USD amount rounded to whole thousands
+  fixed_usd:                               # deliberately small budget (S21, Phase 4)
+    CC-0024: 8000

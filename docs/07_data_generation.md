@@ -136,10 +136,10 @@ Determinism safeguards: no Python `random` module, no set iteration order in log
 | fx rates | 4 rows | same | ASM-003 |
 | anomaly counts | ASM-027 | scaled by 1/10, min 1 | |
 
-Example command (final form fixed in Phase 3):
+Command (final form, Phase 3; all flags and outputs in docs/11_generation_guide.md):
 
 ```
-python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --out data/
+python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --out data --load
 ```
 
 ## 6. Timeline (AM-A6, AM-A7)

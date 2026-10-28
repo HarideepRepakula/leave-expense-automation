@@ -50,3 +50,68 @@ ID_PATTERNS: dict[str, str] = {
 def pattern(entity: str) -> str:
     """Return the anchored regex for an entity, raising KeyError for unknown names."""
     return ID_PATTERNS[entity]
+
+
+# --- formatters (Phase 3). Counters are assigned by callers after a stable sort (docs/07 section 3). ---------
+def employee_id(n: int) -> str:
+    return f"EMP-{n:06d}"
+
+
+def department_id(n: int) -> str:
+    return f"DEPT-{n:02d}"
+
+
+def cost_center_id(n: int) -> str:
+    return f"CC-{n:04d}"
+
+
+def cost_center_budget_id(cc_id: str, year: int) -> str:
+    return f"CCB-{cc_id}-{year}"
+
+
+def assignment_id(n: int) -> str:
+    return f"ECA-{n:06d}"
+
+
+def holiday_id(country: str, d) -> str:
+    return f"HOL-{country}-{d:%Y%m%d}"
+
+
+def fx_rate_id(from_ccy: str, to_ccy: str, d) -> str:
+    return f"FX-{from_ccy}-{to_ccy}-{d:%Y%m%d}"
+
+
+def delegation_id(n: int) -> str:
+    return f"DLG-{n:06d}"
+
+
+def leave_balance_id(emp_id: str, policy_id: str, year: int) -> str:
+    return f"LBAL-{emp_id}-{policy_id}-{year}"
+
+
+def leave_balance_txn_id(year: int, n: int) -> str:
+    return f"LBT-{year}-{n:06d}"
+
+
+def leave_request_id(year: int, n: int) -> str:
+    return f"LVE-{year}-{n:06d}"
+
+
+def expense_claim_id(year: int, n: int) -> str:
+    return f"EXP-{year}-{n:06d}"
+
+
+def expense_line_id(claim_id: str, line_number: int) -> str:
+    return f"EXPL-{claim_id}-{line_number:02d}"
+
+
+def receipt_id(n: int) -> str:
+    return f"RCT-{n:09d}"
+
+
+def user_id(n: int) -> str:
+    return f"USR-{n:06d}"
+
+
+def role_id(role_name: str) -> str:
+    return f"ROLE-{role_name}"

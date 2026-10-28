@@ -1,0 +1,88 @@
+# Six leave policies (ASM-006, ASM-010, ASM-047, ASM-048, AM-B3). Illustrative synthetic, not real policy.
+illustrative_synthetic: true
+
+policies:
+  - id: LPOL-ANNUAL-IN-V1
+    family: LPOL-ANNUAL-IN
+    version: 1
+    name: Annual leave (IN)
+    leave_type: ANNUAL
+    country_scope: IN
+    annual_entitlement_days: "18.0"
+    accrual_method: MONTHLY
+    carry_forward_cap_days: "10.0"
+    negative_balance_allowed: false
+    negative_limit_days: "0.0"
+    requires_medical_cert_over_days: null
+    max_days_per_year: null
+  - id: LPOL-ANNUAL-US-V1
+    family: LPOL-ANNUAL-US
+    version: 1
+    name: Annual leave (US)
+    leave_type: ANNUAL
+    country_scope: US
+    annual_entitlement_days: "15.0"
+    accrual_method: MONTHLY
+    carry_forward_cap_days: "5.0"
+    negative_balance_allowed: true
+    negative_limit_days: "3.0"
+    requires_medical_cert_over_days: null
+    max_days_per_year: null
+  - id: LPOL-ANNUAL-GB-V1
+    family: LPOL-ANNUAL-GB
+    version: 1
+    name: Annual leave (GB)
+    leave_type: ANNUAL
+    country_scope: GB
+    annual_entitlement_days: "25.0"
+    accrual_method: MONTHLY
+    carry_forward_cap_days: "5.0"
+    negative_balance_allowed: false
+    negative_limit_days: "0.0"
+    requires_medical_cert_over_days: null
+    max_days_per_year: null
+  - id: LPOL-SICK-ALL-V1
+    family: LPOL-SICK-ALL
+    version: 1
+    name: Sick leave (all countries)
+    leave_type: SICK
+    country_scope: ALL
+    annual_entitlement_days: "10.0"
+    accrual_method: ANNUAL_GRANT
+    carry_forward_cap_days: "0.0"
+    negative_balance_allowed: false
+    negative_limit_days: "0.0"
+    requires_medical_cert_over_days: "3.0"
+    max_days_per_year: null
+  - id: LPOL-CASUAL-IN-V1
+    family: LPOL-CASUAL-IN
+    version: 1
+    name: Casual leave (IN)
+    leave_type: CASUAL
+    country_scope: IN
+    annual_entitlement_days: "8.0"
+    accrual_method: MONTHLY
+    carry_forward_cap_days: "0.0"
+    negative_balance_allowed: false
+    negative_limit_days: "0.0"
+    requires_medical_cert_over_days: null
+    max_days_per_year: null
+  - id: LPOL-UNPAID-ALL-V1
+    family: LPOL-UNPAID-ALL
+    version: 1
+    name: Unpaid leave (all countries)
+    leave_type: UNPAID
+    country_scope: ALL
+    annual_entitlement_days: "0.0"
+    accrual_method: NONE
+    carry_forward_cap_days: "0.0"
+    negative_balance_allowed: false
+    negative_limit_days: "0.0"
+    requires_medical_cert_over_days: null
+    max_days_per_year: "30.0"
+
+common:
+  min_service_days: 0
+  effective_start: 2025-01-01
+  effective_end: null
+  is_active: true

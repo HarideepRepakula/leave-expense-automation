@@ -1,0 +1,31 @@
+# Expense policies (ASM-011, ASM-012, DEC-05). Illustrative synthetic, not real policy.
+# Limits are defined in USD and converted ONCE to local currency at the reference rate below, then stored
+# on each policy row; comparisons happen in local currency.
+illustrative_synthetic: true
+
+reference_rate_date: 2025-01-01
+local_rounding:            # round half-up to the nearest unit of local currency
+  INR: 10
+  USD: 1
+  GBP: 1
+
+countries: [IN, US, GB]
+categories: [TRAVEL, MEALS, ACCOMMODATION, OFFICE_SUPPLIES, TRAINING, CLIENT_ENTERTAINMENT]
+per_claim_limit_usd: "6000"
+receipt_threshold_usd: "25"
+
+per_line_limit_usd:
+  TRAVEL: "1500"
+  MEALS: "75"
+  ACCOMMODATION: "300"
+  OFFICE_SUPPLIES: "250"
+  TRAINING: "2000"
+  CLIENT_ENTERTAINMENT: "200"
+
+default_effective_start: 2025-01-01
+
+# Families with more than one version (ASM-011). V2 raises the USD per-line base by 10% (ASM-P3-11).
+versioned:
+  MEALS:
+    - {version: 1, effective_start: 2025-01-01, effective_end: 2025-12-31, per_line_multiplier: "1.00"}
+    - {version: 2, effective_start: 2026-01-01, effective_end: null, per_line_multiplier: "1.10"}

@@ -1,0 +1,113 @@
+# Generation parameters (docs/07). Every value is an ASSUMPTION (illustrative synthetic), see docs/09.
+illustrative_synthetic: true
+
+master_seed: 20261022                 # ASM-023
+as_of_date: 2026-10-22                # AM-A7
+window_start: 2025-01-01              # AM-A6
+master_load_timestamp: "2024-12-31T00:00:00Z"   # created_at of master rows (docs/07 section 6)
+
+# RNG streams, in spawn order. Append new names at the END only: SeedSequence.spawn assigns children by
+# position, so inserting a name would change every later stream (docs/07 section 4).
+streams: [employees, cost_centers, balances, leave, expenses, anomalies, boundaries, delays, payments,
+          delegations, users]
+
+volumes:                              # CLI flags override employees / leave_requests / expense_claims
+  employees: 400
+  leave_requests: 800
+  expense_claims: 1000
+  reference_employees: 400            # scale base for delegation and OPS_ANALYST counts
+
+employees:
+  country_shares: {IN: 0.50, US: 0.30, GB: 0.20}                        # ASM-001
+  grade_shares: {G1: 0.30, G2: 0.25, G3: 0.18, G4: 0.12, G5: 0.08, G6: 0.06, G7: 0.01}  # ASM-014
+  department_shares:                                                     # ASM-P3-01
+    DEPT-01: 0.25   # Engineering
+    DEPT-02: 0.18   # Sales
+    DEPT-03: 0.10   # Finance
+    DEPT-04: 0.07   # HR
+    DEPT-05: 0.15   # Operations
+    DEPT-06: 0.08   # Marketing
+    DEPT-07: 0.10   # IT
+    DEPT-08: 0.07   # Legal
+  finance_department: DEPT-03
+  operations_department: DEPT-05
+  employment_start_min: 2015-01-01                                       # ASM-026
+  employment_start_max: 2026-09-30
+  structural_start_max: 2024-12-31                                       # ASM-P3-03
+  terminated_share: 0.05                                                 # ASM-026
+  termination_end_min: 2025-01-01
+  termination_end_max: 2026-09-30
+  leave_of_absence_share: 0.02
+  email_domain: example.test
+  grade_titles:                                                          # ASM-P3-04
+    G1: Associate
+    G2: Specialist
+    G3: Senior Specialist
+    G4: Lead
+    G5: Manager
+    G6: Senior Manager
+    G7: Chief Financial Officer
+
+delegations:                                                             # ASM-049
+  count_at_reference: 10
+  min_days: 5
+  max_days: 20
+
+users:                                                                   # ASM-036
+  password_length: 12
+  bcrypt_rounds: 4                     # ASM-P3-10: lowest cost; synthetic dev credentials only
+  ops_analysts_at_reference: 5
+  process_owner_departments: [DEPT-03, DEPT-04]   # Finance and HR heads
+  admin_username: admin@example.test
+
+timeline:
+  weekend_submission_weight: 0.4      # ASM-P3-05 weekday weight is 1.0 (ASM-022 "mild weekday bias")
+  submission_hour_min: 8              # ASM-P3-05 UTC hour range of submission timestamps
+  submission_hour_max: 18
+  draft_share: 0.01                   # ASM-022
+
+leave:
+  type_weights:                       # ASM-P3-06
+    IN: {ANNUAL: 0.50, SICK: 0.25, CASUAL: 0.15, UNPAID: 0.10}
+    US: {ANNUAL: 0.60, SICK: 0.30, UNPAID: 0.10}
+    GB: {ANNUAL: 0.60, SICK: 0.30, UNPAID: 0.10}
+  # Business-day count N drawn with weight decay**(N - min_bd) ("skewed short"); quantity = N - 0.5 per flag.
+  durations:                          # ASM-042
+    ANNUAL: {min_bd: 1, max_bd: 15, decay: 0.82, min_quantity: "1.0", half_day_prob: 0.10}
+    CASUAL: {min_bd: 1, max_bd: 3,  decay: 0.60, min_quantity: "0.5", half_day_prob: 0.25}
+    SICK:   {min_bd: 1, max_bd: 7,  decay: 0.65, min_quantity: "0.5", half_day_prob: 0.15}
+    UNPAID: {min_bd: 1, max_bd: 20, decay: 0.88, min_quantity: "1.0", half_day_prob: 0.0}
+  start_offset_days:                  # days from submission date to start date, before moving to a business day
+    default: {min: 1, max: 60}
+    SICK: {min: -3, max: 60}
+  last_leave_date: 2026-12-31         # ASM-P3-13 no 2027 balances exist, so leave ends by this date
+  max_attempts_per_request: 500
+
+expenses:
+  line_count_weights: [0.25, 0.22, 0.18, 0.12, 0.07, 0.05, 0.04, 0.03, 0.02, 0.02]   # 1..10 lines, ASM-041
+  primary_category_weights:           # ASM-P3-07
+    TRAVEL: 0.20
+    MEALS: 0.30
+    ACCOMMODATION: 0.15
+    OFFICE_SUPPLIES: 0.15
+    TRAINING: 0.08
+    CLIENT_ENTERTAINMENT: 0.12
+  same_category_share: 0.70           # ASM-P3-07 share of lines in the claim's drawn category
+  amount_range_usd:                   # ASM-041, drawn log-uniform, converted at the submission-date rate
+    TRAVEL: [50, 1400]
+    MEALS: [8, 70]
+    ACCOMMODATION: [80, 290]
+    OFFICE_SUPPLIES: [5, 240]
+    TRAINING: [100, 1900]
+    CLIENT_ENTERTAINMENT: [20, 190]
+  submission_after_latest_line_days: [1, 30]   # ASM-041 / docs/07 section 6
+  max_line_age_days: 90
+  receipt_below_threshold_share: 0.60  # ASM-P3-08 lines >= threshold always carry a receipt
+  merchant_labels:                     # ASM-P3-09
+    TRAVEL: [Taxi fare, Train fare, Flight, Car hire, Fuel]
+    MEALS: [Breakfast, Lunch, Dinner, Team meal]
+    ACCOMMODATION: [Hotel stay, Serviced apartment]
+    OFFICE_SUPPLIES: [Stationery, Printer supplies, Computer accessories]
+    TRAINING: [Course fee, Conference registration, Certification exam]
+    CLIENT_ENTERTAINMENT: [Client dinner, Client lunch, Event tickets]
+  max_attempts_per_claim: 500

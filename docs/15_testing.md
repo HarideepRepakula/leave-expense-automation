@@ -7,7 +7,9 @@
 | tests/test_project_layout.py | no | folder structure, .env.example hygiene, .gitignore |
 | tests/test_no_wallclock_usage.py | no | amendment A7: no datetime.now in src/ |
 | tests/test_dictionary_matches_models.py | no (needs SQLAlchemy) | every model table and column is in docs/10 and vice versa |
-| tests/db/ | yes (lea_test) | schema entities, ID and enum CHECKs, employee and date rules, exactly-one request FK, expense claim and line rules, reimbursement uniqueness and trigger, append-only and immutability triggers, leave balance generated column, test-only EXCLUDE constraint, role permissions, migration cycle |
+| tests/db/ | yes (lea_test) | schema entities, ID and enum CHECKs, employee and date rules, exactly-one request FK, expense claim and line rules, reimbursement uniqueness and trigger, append-only and immutability triggers, leave balance generated column, test-only EXCLUDE constraint, role permissions, migration cycle; Phase 3: test_generator_load.py loads the starter dataset into lea_test (every CHECK, FK and trigger must accept it), compares counts, then truncates ops |
+| tests/data/ (Phase 3) | no | test_generator_baseline.py: exact volumes at full and starter scale, ID formats, PK uniqueness, FK resolution, hierarchy and authority structure, ledger = snapshot, validity of every leave request and expense claim; test_generator_reproducibility.py: two runs give identical row counts and SHA-256 per file (full and starter), a different seed changes the data, canonical CSV, stream independence |
+| tests/unit/ (Phase 3) | no | test_calendar_and_accrual.py: hand-built cases for business days, quantities, year split, accrual, annual grant, rounding, version resolution |
 
 Later phases add tests/unit, tests/integration, tests/api, tests/analytics, tests/validation, tests/evaluation, tests/reference and tests/fixtures/negative.
 

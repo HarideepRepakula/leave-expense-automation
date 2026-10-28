@@ -1,0 +1,14 @@
+# Approval routing rules (docs/05 section 5.2, ASM-009, ASM-013). Illustrative synthetic.
+# Bands: lower bound exclusive, upper bound inclusive. NULL country / type = matches all.
+illustrative_synthetic: true
+
+effective_start: 2025-01-01
+rules:
+  - {id: RULE-E-001, request_type: EXPENSE, max_amount_usd: "200.00", levels: [L1], priority: 10}
+  - {id: RULE-E-002, request_type: EXPENSE, min_amount_usd: "200.00", max_amount_usd: "1000.00", levels: [L1, L2], priority: 10}
+  - {id: RULE-E-003, request_type: EXPENSE, min_amount_usd: "1000.00", max_amount_usd: "5000.00", levels: [L1, L2, L4], priority: 10}
+  - {id: RULE-E-004, request_type: EXPENSE, min_amount_usd: "5000.00", levels: [L1, L2, L4, L5], priority: 10}
+  - {id: RULE-L-001, request_type: LEAVE, max_days: "5.0", levels: [L1], priority: 10}
+  - {id: RULE-L-002, request_type: LEAVE, min_days: "5.0", max_days: "10.0", levels: [L1, L2], priority: 10}
+  - {id: RULE-L-003, request_type: LEAVE, min_days: "10.0", levels: [L1, L3], priority: 10}
+  - {id: RULE-L-004, request_type: LEAVE, category_or_leave_type: UNPAID, levels: [L1, L3], priority: 20}

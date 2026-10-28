@@ -6,6 +6,12 @@ psycopg[binary]>=3.1.18,<4
 python-dotenv>=1.0,<2
 pydantic>=2.7,<3
 pydantic-settings>=2.2,<3
+# Phase 3: generator. Pinned EXACTLY: a different numpy or Faker version can change drawn values and
+# therefore the dataset checksums (DEC-40).
+numpy==2.2.6
+Faker==37.4.0
+PyYAML==6.0.2
+bcrypt==4.3.0
 pytest>=8.2,<9
 pytest-cov>=5,<6
 ruff>=0.5,<1
