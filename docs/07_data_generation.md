@@ -289,7 +289,7 @@ src/validation runs on the exported files and, when the database is loaded, on t
 | Validation | src/validation/{reader,checks,report,__main__}.py | 21 structural/arithmetic/workflow checks; M1-M3; detections.csv arrives with the Phase 5-6 detectors (DEC-P4-07) |
 | Negative fixtures | tests/fixtures/negative/ via scripts/build_negative_fixtures.py | 8 lifecycle (S16), 8 arithmetic (S17), 2 rule-conflict (S20), 3 structural |
 
-S19 construction (fixed here, AMB-P4-01): the requester is the G7 (no L1). Attempt-type scenarios S11, S12, S13, S18 and
+S19 construction (fixed here, AMB-P4-01; Phase 7B AMB-P7B-09): the requester is a G7 (no L1). S1 promotes, in each country without a G7, the lowest-id ACTIVE G6 employed for the whole window to G7 (manager NULL, no draws), so there is one G7 per country; the S19 plants are split evenly over the G7s in id order. Attempt-type scenarios S11, S12, S13, S18 and
 the technical failures S25 need approval steps, reimbursements and idempotency rows; they are listed in scenarios.json
 with actual_count NULL and are built with Phases 7-8.
 

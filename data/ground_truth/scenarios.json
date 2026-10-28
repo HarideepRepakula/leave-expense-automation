@@ -98,7 +98,7 @@
     "scenario_id": "S03"
   },
   {
-    "actual_count": 60,
+    "actual_count": 62,
     "description": "Leave spanning weekends and public holidays (control; planted + natural, at least the planned total)",
     "issue_type": "WEEKEND_HOLIDAY_SPAN",
     "planned_count": 40,
@@ -182,7 +182,7 @@
     "scenario_id": "S13"
   },
   {
-    "actual_count": 790,
+    "actual_count": 788,
     "description": "Multi-level approval route (natural control; expected at least the planned count)",
     "issue_type": "MULTI_LEVEL_ROUTE",
     "planned_count": 150,
@@ -225,14 +225,14 @@
   },
   {
     "actual_count": 4,
-    "description": "No valid approval path, expense (G7 requester)",
+    "description": "No valid approval path, expense (a G7 requester)",
     "issue_type": "NO_VALID_APPROVAL_PATH",
     "planned_count": 4,
     "scenario_id": "S19-E"
   },
   {
     "actual_count": 4,
-    "description": "No valid approval path, leave (G7 requester)",
+    "description": "No valid approval path, leave (a G7 requester)",
     "issue_type": "NO_VALID_APPROVAL_PATH",
     "planned_count": 4,
     "scenario_id": "S19-L"

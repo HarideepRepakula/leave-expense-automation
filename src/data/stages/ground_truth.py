@@ -53,7 +53,7 @@ DESCRIPTIONS = {
     "S15": "Expired policy version referenced", "S16": "Invalid lifecycle transition (negative fixtures)",
     "S17": "Arithmetic reconciliation failure (negative fixtures)",
     "S18": "Repeated submission, idempotent replay (rows built in Phase 7)",
-    "S19-L": "No valid approval path, leave (G7 requester)", "S19-E": "No valid approval path, expense (G7 requester)",
+    "S19-L": "No valid approval path, leave (a G7 requester)", "S19-E": "No valid approval path, expense (a G7 requester)",
     "S20": "Rule conflict (negative fixtures)", "S21": "Budget exceeded on CC-0024",
     "S22": "Overlap with pending leave", "S23": "Sick leave above 3 days without certificate",
     "S24": "Delegated L1 route (control)",

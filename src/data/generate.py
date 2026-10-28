@@ -115,6 +115,10 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         "as_of_date": p.as_of.isoformat(),
         "window_start": p.window_start.isoformat(),
     }
+    with_g7 = {e["country"] for e in dataset["employee"] if e["grade"] == "G7"}
+    missing_g7 = sorted({e["country"] for e in dataset["employee"]} - with_g7)
+    if missing_g7:                    # AMB-P7B-10: no eligible G6 to promote (small scales); L5 unresolved there
+        meta["countries_without_g7"] = missing_g7
     if truth is not None:
         meta["ground_truth_counts"] = {name: len(rows) for name, rows in truth.tables.items()}
         meta["scenarios_not_reached"] = scenario_shortfalls(truth.tables["scenario"])
@@ -231,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     print(f"seed={gen.meta['seed']} parameters={gen.meta['parameters']} as_of={gen.meta['as_of_date']}")
     _print_summary(gen, manifest, args.out if manifest else None, results, load_counts, db_name)
+    for c in gen.meta.get("countries_without_g7", []):
+        print(f"WARNING: country {c} has no G7 (no ACTIVE G6 employed for the whole window to promote); "
+              f"requests needing L5 there have no valid approval path (recorded in manifest.json under "
+              f"countries_without_g7)", file=sys.stderr)
     for s in gen.meta.get("scenarios_not_reached", []):
         print(f"WARNING: scenario {s['scenario_id']} {s['status'].replace('_', ' ').lower()}: "
               f"{s['actual']} of {s['planned']} planned records (too few candidates at this scale; "

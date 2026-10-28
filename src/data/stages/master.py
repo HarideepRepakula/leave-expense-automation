@@ -183,12 +183,13 @@ def _employees(cfg: dict, p: GenParams, streams: RngStreams, departments: list[d
         candidates[int(j)]["status"] = EmploymentStatus.ON_LEAVE_OF_ABSENCE.value
 
     _assign_managers(drafts, rng, p.window_start, finance)
+    _promote_country_g7s(drafts, countries, p.window_start)
 
     cc_by_key = {(c["department_id"], c["country"]): c["cost_center_id"] for c in cost_centers}
     titles = ecfg["grade_titles"]
     rows = []
     for d in drafts:
-        if d["role"] == "CFO":
+        if d["role"] == "CFO" or d["grade"] == "G7":
             title = titles["G7"]
         elif d["role"] == "HEAD":
             title = f"Head of {dept_names[d['dept']]}"
@@ -251,6 +252,21 @@ def _assign_managers(drafts: list[dict], rng, window_start: date, finance: str) 
             e["manager"] = heads[e["dept"]]["employee_id"]
         else:
             e["manager"] = root["employee_id"]
+
+
+def _promote_country_g7s(drafts: list[dict], countries: list[str], window_start: date) -> None:
+    """Owner decision S19 option (a), AMB-P7B-09: every country has exactly one G7. In each country without one,
+    the lowest-id G6 that is ACTIVE and employed for the whole window becomes G7 at the top of the chain
+    (manager NULL); department, head flag and reports stay. No random draws (runs after the managers).
+    A country with no such G6 (small scales) keeps no G7; the generator warns and records it (AMB-P7B-10)."""
+    for c in countries:
+        if any(d["grade"] == "G7" and d["country"] == c for d in drafts):
+            continue
+        d = min((d for d in drafts if d["grade"] == "G6" and d["country"] == c
+                 and d["status"] == EmploymentStatus.ACTIVE.value and d["end"] is None
+                 and d["start"] <= window_start), key=lambda d: d["employee_id"], default=None)
+        if d is not None:
+            d["grade"], d["manager"] = "G7", None
 
 
 def _ascii(name: str) -> str:

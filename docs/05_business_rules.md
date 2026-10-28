@@ -82,7 +82,7 @@ Order of checks is fixed; all checks run and all failing codes are recorded, the
 | L2 | Skip-level manager | manager of L1 |
 | L3 | Department head | department.head_employee_id of requester's department |
 | L4 | Finance controller | employee with is_finance_controller and same country as requester (one per country, ASM-014) |
-| L5 | CFO-level | the employee with grade G7 in the requester's country (owner decision S19 option a, each the only G7 of its country); while a country has none and the organisation has exactly one G7, that one (AMB-P7A-01) |
+| L5 | CFO-level | the employee with grade G7 in the requester's country (owner decision S19 option a, AMB-P7B-09: one G7 per country); none or two in the country -> unresolved (NO_VALID_APPROVAL_PATH). The AMB-P7A-01 fallback was removed in Phase 7B |
 
 Authority rank: L1 < L2 < L3 < L4 < L5. An approver "holds" a level if they are the resolved person for that level for this requester, or hold a higher level in the same chain (a department head may act at L1 or L2 for their own department). Finance roles (L4, L5) are chain-independent.
 

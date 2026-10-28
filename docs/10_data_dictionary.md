@@ -58,7 +58,7 @@ Why: core entity (spec 7.1). Self-referencing hierarchy; no cycles (service vali
 | manager_id | text | no | FK employee | | NULL at top of chain | <> employee_id; manager grade > employee grade (service) | GEN |
 | department_id | text | yes | FK department | | | | GEN |
 | job_title | text | yes | | | | | GEN |
-| grade | text | yes | | G1 .. G7 | | enum; exactly one G7 (service) | GEN |
+| grade | text | yes | | G1 .. G7 | | enum; exactly one G7 per country (AMB-P7B-09) | GEN |
 | country | text | yes | | IN, US, GB | | enum | GEN |
 | currency | text | yes | | INR, USD, GBP | | enum; = CURRENCY_BY_COUNTRY[country] (service) | CALC |
 | employment_start | date | yes | | | | | GEN |

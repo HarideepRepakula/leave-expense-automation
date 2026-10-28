@@ -129,7 +129,11 @@ class Oracle:
         self.process_owners = sorted({user_emp[ur["user_id"]] for ur in tables.get("user_role", [])
                                       if role_names.get(ur["role_id"]) == PO and user_emp.get(ur["user_id"])})
         self.emps = {e["employee_id"]: e for e in tables["employee"]}
-        self.root = next((e["employee_id"] for e in self.emps.values() if e["grade"] == "G7"), None)
+        # L5: the G7 of the requester's country; none or several -> no approver (S19 option a, AMB-P7B-09).
+        self.g7_by_country: dict[str, list[str]] = {}
+        for e in self.emps.values():
+            if e["grade"] == "G7":
+                self.g7_by_country.setdefault(e["country"], []).append(e["employee_id"])
         self.heads = {d["department_id"]: d["head_employee_id"] for d in tables["department"]}
         self.controllers = {e["country"]: e["employee_id"] for e in self.emps.values() if e["is_finance_controller"]}
         self.delegations = tables.get("delegation", [])
@@ -228,13 +232,14 @@ class Oracle:
         if level == "L1":
             return m
         if level == "L2":
-            # AMB-P3-03: when L1 is the root (G7) there is no skip-level; the root covers L2 in one step.
+            # AMB-P3-03: when L1 is a top-of-chain G7 there is no skip-level; that G7 covers L2 in one step.
             return None if m is None else (self.emps[m]["manager_id"] or m)
         if level == "L3":
             return self.heads.get(emp["department_id"])
         if level == "L4":
             return self.controllers.get(emp["country"])
-        return self.root
+        g7s = self.g7_by_country.get(emp["country"], [])
+        return g7s[0] if len(g7s) == 1 else None
 
     def select_rule(self, request_type: str, country: str, category: str, measure: Decimal, d: date):
         """Returns (rule, error_code). Bands: lower exclusive, upper inclusive (ASM-009, ASM-013)."""

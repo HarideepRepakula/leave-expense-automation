@@ -1,7 +1,8 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
 Current phase: Phase 7B (decisions, resubmission, process-owner decisions, S6 timing, CARRY_FORWARD rows)
-Status: COMPLETE except the S19 dataset change (plan below, waiting for the owner's OK). Awaiting "APPROVED PHASE 7B".
+Status: COMPLETE including S19 option A (owner 2026-10-28). ONE OPEN ITEM: V-WF-05 finds 1 decision after the
+  approver's employment end (AMB-P7B-11, owner decision needed). Awaiting "APPROVED PHASE 7B".
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -92,20 +93,42 @@ which later decisions mutated; fix: stores keep copies. (2) a unit test mutated 
 leaked into later tests); fix: the test gives its router its own list. (3) generator baseline / oracle tests expected
 eventual statuses; now final_status is at as-of and eventual_status is checked.
 
-S19 plan (NOT applied; waiting for the owner's OK):
-- Change: S1 keeps the drawn organisation, then promotes one person per country without a G7 (US, GB): the
-  lowest-id ACTIVE G6 of that country employed through the window becomes G7 (job title "Chief Financial Officer"),
-  manager_id NULL (top of chain), keeps its department and reports. No new RNG draws, no new stream.
-  S19-L / S19-E plants (4 + 4) are spread over the three G7s; L5 = the G7 of the requester's country.
-- Stays: seed, stream order, volumes 400 / 6 / 800 / 1,000, policies, rules, calendars, every scenario count, the
-  IN G7 (EMP-000314) and its Finance headship; leave and expense draws (S3 / S4 guards do not route).
-- Expected effect (estimate): 2 employee rows change (grade G6 -> G7, manager NULL); routes change for the
-  promoted people's reports (L2 becomes the promoted G7, one step L1+L2 when it is L1) and for US / GB claims above
-  5,000 USD (L5); S19 records move; S6 outcomes and ground truth follow. Fingerprint changes; employee, leave,
-  expense, workflow and ground-truth files change; master tables other than employee stay identical.
-- Alternative: add two G7 slots in S1 (shifts the employees stream: nearly every file changes).
+S19 option A (owner 2026-10-28; AMB-P7B-09, ASM-P7B-11, DEC-P7B-09), applied after the main 7B commit:
+- S1 promotes the lowest-id ACTIVE G6 (no end date, started by the window start) in each country without a G7:
+  EMP-000031 (US), EMP-000181 (GB); EMP-000314 (IN) unchanged. Manager NULL, no draws. Neither is the subject of any
+  other plant. S19 plants split 2+2 / 1+1 / 1+1 over the three G7s; no unplanted NO_VALID_APPROVAL_PATH.
+- AMB-P7A-01 fallback removed from routing; the oracle's single-G7 L5 replaced by the per-country rule.
+- Condition 3 (owner, amended): planned counts met and planted actuals unchanged (all are). Natural counts moved:
+  S04 60 -> 62, S14 790 -> 788, natural split-claim labels 2 -> 0 (labels 1057 -> 1055).
+- New check V-WF-05 (AMB-P7B-06): no decision after the approver's employment end. REAL result: 1 violation,
+  APR-EXP-2025-000483-02 (EMP-000190 decided 2025-12-17, employed until 2025-12-14). 0 at e15dc94 (rebuilt to check);
+  it comes from the redraw. Not hidden: validation and the generator exit 1, pytest shows it as strict xfail, and
+  reproducibility_check.ps1 stops at the generator's exit code (run by hand below). Owner decision AMB-P7B-11.
+- AMB-P7B-10 (default applied, please confirm): a country without an eligible G6 keeps no G7; WARNING + manifest
+  countries_without_g7 (found at starter scale, seed 20261023; not reached at full scale).
+- Tests adjusted: one G7 per country (baseline, S19, G7 direct reports for every G7), L5 without fallback, natural split
+  test -> planted S09 detected exactly, baseline overlap test now allows AM + PM half days on one date (ASM-008; a
+  pair the redraw produced; the generator was right).
+- Files changed: src/data/stages/{master,anomalies,ground_truth}.py, src/data/generate.py, src/services/approval_routing.py,
+  src/reference/oracle.py, src/validation/checks.py; tests/unit/test_approval_routing.py,
+  tests/data/{test_generator_baseline,test_anomalies_and_ground_truth}.py, tests/validation/test_validation.py;
+  docs/05, 07, 09 (12.2-12.4), 10, 15; data/manifest.json, data/ground_truth/*.
+- Before -> after: employee G6 24 -> 22, G7 1 -> 3; approval_step 2548 -> 2547 (APPROVED 2506 -> 2518, PENDING 42 -> 29);
+  leave APPROVED 755 -> 756, DRAFT 8 -> 7, ESCALATED 5 -> 6, PENDING 12 -> 11; expense APPROVED 893 -> 902,
+  ESCALATED 19 -> 17, PENDING 20 -> 12, RETURNED 33 -> 34; user_role 596 -> 597.
+- REAL results (2026-10-28): generate --load exit 1 (V-WF-05 only), every lea_dev count = generated; validation 22
+  checks, 1 failed (V-WF-05), M1 0/48253, M2 0/79434, M3 6981/6981; leave 800 AGREE / 0 DISAGREE; expense 1000 AGREE /
+  0 DISAGREE; reproducibility by hand (two runs + compare_runs): RESULT: REPRODUCIBLE, fingerprint
+  5d85c28b7fc102c212a22a22db13d2531e5cf434abb6a13a5ad5c99f38e170fe; files vs e15dc94: 22 identical, 46 changed;
+  pytest -q: 463 passed, 1 xfailed; ruff --select F,E9: All checks passed.
 
-Open issues: S19 OK; AMB-P7B-01..09 (docs/09 12.3); JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
+Phase 8 MUST include (owner 2026-10-28):
+- Resubmission rounds and cancellations in the dataset (AMB-P7B-02; ASM-025, ASM-040).
+- S11 / S12 self-approval and unauthorised-approval attempt scenarios in the dataset (AMB-P7B-03).
+- The reimbursement row created at final approval (AMB-P7B-04; docs/06 8.2).
+- Resolve AMB-P7B-11 (V-WF-05) as the owner decides.
+
+Open issues: AMB-P7B-11 (V-WF-05); AMB-P7B-10 confirm; JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
 
 Acceptance criteria after Phase 7B: 1-8, 13, 17, 21 MET; 9 approval routing MET for routing and decisions (agreed
 with the oracle at as-of on every record); 10 self-approval MET at service and DB level (guard + trigger, V-WF-02);

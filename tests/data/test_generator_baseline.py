@@ -93,8 +93,9 @@ def test_hierarchy_and_authority_structure(run):
     _, _, ds = run
     emps = {e["employee_id"]: e for e in ds["employee"]}
     roots = [e for e in emps.values() if e["manager_id"] is None]
-    assert len(roots) == 1 and roots[0]["grade"] == "G7"
-    assert sum(e["grade"] == "G7" for e in emps.values()) == 1
+    g7s = [e for e in emps.values() if e["grade"] == "G7"]
+    assert roots == g7s and sorted(e["country"] for e in g7s) == ["GB", "IN", "US"]  # one G7 per country (AMB-P7B-09)
+    assert all(e["employment_status"] == "ACTIVE" and e["employment_end"] is None for e in g7s)
     for e in emps.values():
         if e["manager_id"]:
             assert GRADE_RANK[emps[e["manager_id"]]["grade"]] > GRADE_RANK[e["grade"]]
@@ -111,7 +112,7 @@ def test_hierarchy_and_authority_structure(run):
     for dept, head in heads.items():
         h = emps[head]
         assert h["is_department_head"] and h["department_id"] == dept
-        assert h["grade"] == ("G7" if dept == "DEPT-03" else "G6")
+        assert h["grade"] == "G7" if dept == "DEPT-03" else h["grade"] in ("G6", "G7")  # a promoted G6 head
         assert h["employment_end"] is None and h["employment_start"] < WINDOW_START
     assert sum(e["is_department_head"] for e in emps.values()) == 8
 
@@ -192,7 +193,10 @@ def test_leave_requests_are_valid_baseline(run, calendar):
     for reqs in by_emp.values():
         reqs.sort(key=lambda r: r["start_date"])
         for a, b in zip(reqs, reqs[1:]):
-            assert a["end_date"] < b["start_date"], "no overlapping requests in the baseline"
+            # ASM-008 (BR-LV-10/11): an afternoon half day after a morning half day on the same date is no overlap.
+            shared_half = a["end_date"] == b["start_date"] and (
+                (a["end_half_day"] and b["start_half_day"]) or (b["end_half_day"] and a["start_half_day"]))
+            assert a["end_date"] < b["start_date"] or shared_half, "no overlapping requests in the baseline"
 
 
 def test_leave_baseline_is_valid_for_the_independent_oracle(run):

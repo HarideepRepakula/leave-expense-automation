@@ -180,9 +180,10 @@ def test_delegation_to_the_requester_leaves_the_level_unresolved():
 
 
 # --- L5 per country (S19 option a) and ambiguous roles -----------------------------------------------------------
-def test_l5_is_the_g7_of_the_requesters_country_else_the_only_g7():
+def test_l5_is_the_g7_of_the_requesters_country_with_no_fallback():
     us_g7 = emp("EMP-000190", None, "DEPT-FIN", "G7", "US")
-    assert route(router(), "EXPENSE", DEV_US, "6000.00", "TRAVEL")[1][-1] == ("L5", CEO, ("L5",), None)  # AMB-P7A-01
+    # AMB-P7B-09: the AMB-P7A-01 fallback is gone; a country without its own G7 has no L5.
+    assert route(router(), "EXPENSE", DEV_US, "6000.00", "TRAVEL")[2] == "NO_VALID_APPROVAL_PATH"
     assert route(router(extra_emps=[us_g7]), "EXPENSE", DEV_US, "6000.00", "TRAVEL")[1][-1] == \
         ("L5", "EMP-000190", ("L5",), None)
     assert route(router(extra_emps=[us_g7]), "EXPENSE", DEV, "6000.00", "TRAVEL")[1][-1] == ("L5", CEO, ("L5",), None)

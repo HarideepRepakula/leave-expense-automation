@@ -98,7 +98,7 @@ class Validator:
                    self.approved_amounts, self.line_arithmetic, self.reimbursement_amounts, self.balance_ledger,
                    self.leave_quantities, self.fx_conversion, self.budget_ledger, self.lifecycle,
                    self.approval_sequence, self.self_approval, self.reimbursement_eligibility,
-                   self.cost_center_exception):
+                   self.cost_center_exception, self.approver_employed_at_decision):
             fn()
         return self.results
 
@@ -420,6 +420,19 @@ class Validator:
             r.subject("expense_claim", c["expense_claim_id"])
             if c["cost_center_id"] is None and c["exception_class"] == "NONE":
                 r.fail("expense_claim", c["expense_claim_id"], "NULL cost center with exception class NONE")
+
+    def approver_employed_at_decision(self) -> None:
+        """AMB-P7B-06: no step decision dated after the assigned approver's employment end date."""
+        r = self.check("V-WF-05", "No approval decision after the approver's employment end date (AMB-P7B-06)",
+                       "WORKFLOW")
+        end = {e["employee_id"]: e["employment_end"] for e in self.rows("employee")}
+        for s in self.rows("approval_step"):
+            if s["decision_at"] is not None:
+                r.subject("approval_step", s["approval_step_id"])
+                left = end.get(s["approver_employee_id"])
+                if left is not None and s["decision_at"].date() > left:
+                    r.fail("approval_step", s["approval_step_id"],
+                           f"decided {s['decision_at'].date()} by {s['approver_employee_id']}, employment ended {left}")
 
 
 def validate(ds: dict[str, list[dict]], weekend_days: dict[str, list[int]]) -> list[CheckResult]:

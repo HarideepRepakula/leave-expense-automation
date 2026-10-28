@@ -80,11 +80,17 @@ def test_natural_labels_cover_every_unplanted_code(gen):
             assert not r["is_planted"] and r["injection_reason"] == "natural consequence"
 
 
-def test_natural_split_pair_labelled_naturally_occurring(full_gen):
-    """Carry-in: the split pair that occurs naturally in the baseline is labelled is_planted = false."""
-    natural = [r for r in full_gen.truth.tables["anomaly_label"]
-               if r["scenario_id"] == "NATURAL" and r["issue_type"] == "SPLIT_CLAIM_SUSPECTED"]
-    assert len(natural) == 2 and all(not r["is_planted"] for r in natural)
+def test_split_claims_planted_exactly_and_natural_ones_labelled_unplanted(full_gen):
+    """Natural split pairs may come and go with the draws (owner rule 2026-10-28: 2 before S19, 0 after); any that
+    occur are labelled is_planted = false. Planted split claims are all reached and detected exactly."""
+    labels = [r for r in full_gen.truth.tables["anomaly_label"] if r["issue_type"] == "SPLIT_CLAIM_SUSPECTED"]
+    assert all(not r["is_planted"] for r in labels if r["scenario_id"] == "NATURAL")
+    s09 = {r["affected_record_id"] for r in labels if r["scenario_id"] == "S09"}
+    scenario = {s["scenario_id"]: s for s in full_gen.truth.tables["scenario"]}["S09"]
+    assert len(s09) == scenario["actual_count"] == scenario["planned_count"]
+    detected = {d.record_id for d in full_gen.detections if d.exception_code == "SPLIT_CLAIM_SUSPECTED"}
+    assert detected == {r["affected_record_id"] for r in labels if r["expected_detection"] == "DETECT"}
+    assert s09 <= detected
 
 
 def test_at_least_eight_claims_reach_l5(full_gen):
@@ -96,33 +102,34 @@ def test_at_least_eight_claims_reach_l5(full_gen):
 
 
 def test_s19_cause_is_g7_requester_not_l1_is_g7(gen):
-    """Carry-in: planted S19 requests come from the G7 (no L1), never from a direct report of the G7."""
+    """Carry-in: planted S19 requests come from a G7 (no L1), never from a direct report of a G7."""
     _, _, g = gen
     ds = g.dataset
-    g7 = next(e["employee_id"] for e in ds["employee"] if e["grade"] == "G7")
+    g7s = {e["employee_id"] for e in ds["employee"] if e["grade"] == "G7"}
     owners = {**{r["leave_request_id"]: r["employee_id"] for r in ds["leave_request"]},
               **{c["expense_claim_id"]: c["employee_id"] for c in ds["expense_claim"]}}
     s19 = [r for r in g.truth.tables["anomaly_label"] if r["scenario_id"] in ("S19-L", "S19-E")]
-    assert s19 and all(owners[r["affected_record_id"]] == g7 for r in s19)
+    assert s19 and all(owners[r["affected_record_id"]] in g7s for r in s19)
     natural_nvp = [r for r in g.truth.tables["anomaly_label"]
                    if r["scenario_id"] == "NATURAL" and r["issue_type"] == "NO_VALID_APPROVAL_PATH"]
-    assert natural_nvp == [], "direct reports of the G7 resolve to one G7 step (AMB-P3-03)"
+    assert natural_nvp == [], "direct reports of a G7 resolve to one G7 step (AMB-P3-03)"
 
 
 def test_g7_direct_reports_get_one_step_covering_l1_and_l2(full_gen):
     ds = full_gen.dataset
-    g7 = next(e["employee_id"] for e in ds["employee"] if e["grade"] == "G7")
-    reports = {e["employee_id"] for e in ds["employee"] if e["manager_id"] == g7}
+    g7s = {e["employee_id"] for e in ds["employee"] if e["grade"] == "G7"}  # one per country (AMB-P7B-09)
+    manager = {e["employee_id"]: e["manager_id"] for e in ds["employee"]}
     owners = {c["expense_claim_id"]: c["employee_id"] for c in ds["expense_claim"]}
-    checked = 0
+    checked = set()
     for r in full_gen.truth.tables["record_expectation"]:
-        if r["record_type"] == "EXPENSE" and owners[r["record_id"]] in reports and r["expected_route"]:
+        g7 = manager.get(owners.get(r["record_id"]))
+        if r["record_type"] == "EXPENSE" and g7 in g7s and r["expected_route"]:
             first = r["expected_route"][0]
             if "L2" in first["covers"]:
                 assert first["approver_id"] == g7 and first["covers"][:2] == ["L1", "L2"]
                 assert len({s["approver_id"] for s in r["expected_route"]}) == len(r["expected_route"])
-                checked += 1
-    assert checked > 0
+                checked.add(g7)
+    assert len(checked) >= 2, checked
 
 
 def test_legacy_approvals_post_usage_and_reconcile(full_gen):

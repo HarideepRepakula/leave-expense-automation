@@ -9,8 +9,8 @@ NO_VALID_APPROVAL_PATH. Never an arbitrary approver (AM-B9): an unresolved level
 
 Levels (docs/05 5.1): L1 the direct manager; L2 the manager's manager, or the manager when the manager is the top
 of the chain (AMB-P3-03); L3 the head of the requester's department; L4 the one finance controller of the
-requester's country; L5 the one G7 of the requester's country (owner decision S19 option a), or the organisation's
-single G7 while no country has its own (AMB-P7A-01). Two candidates for one role -> unresolved.
+requester's country; L5 the one G7 of the requester's country (owner decision S19 option a, AMB-P7B-09). No
+candidate, or two for one role -> unresolved.
 
 Substitution (docs/05 5.4, ASM-030): the requester moves one step up the chain; a person with an active delegation
 is replaced by the delegate (delegated_from = the first person replaced by a delegate); a person whose employment
@@ -94,9 +94,6 @@ class Organisation:
             found = self.controllers.get(requester["country"], [])
             return found[0] if len(found) == 1 else None
         found = self.top.get(requester["country"], [])
-        if not found:                     # AMB-P7A-01: no G7 in the country -> the organisation's only G7
-            everyone = [e for ids in self.top.values() for e in ids]
-            found = everyone if len(everyone) == 1 else []
         return found[0] if len(found) == 1 else None
 
     def substitute(self, person: str | None, requester_id: str, on: date) -> tuple[str | None, str | None]:

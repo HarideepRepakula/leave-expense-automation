@@ -60,7 +60,7 @@ Three sections: assumptions (ASM), open ambiguities with a proposed default (AMB
 
 | ID | Assumption |
 |---|---|
-| ASM-014 | Grades G1..G7 with approximate shares 30/25/18/12/8/6/1 percent; exactly one G7 (CFO-level, L5). Hierarchy generated as a tree by grade (a manager has a strictly higher grade), max depth 7, no cycles. Exactly one finance controller per country (is_finance_controller, grade G5 or G6, in the Finance department). |
+| ASM-014 | Grades G1..G7 with approximate shares 30/25/18/12/8/6/1 percent; exactly one G7 (CFO-level, L5); since Phase 7B one G7 per country (AMB-P7B-09). Hierarchy generated as a tree by grade (a manager has a strictly higher grade), max depth 7, no cycles. Exactly one finance controller per country (is_finance_controller, grade G5 or G6, in the Finance department). |
 | ASM-015 | Eight departments: Engineering, Sales, Finance, HR, Operations, Marketing, Legal, IT. Each has a head (is_department_head, grade G6, or G7 for Finance). |
 | ASM-016 | 24 cost centers = 8 departments x 3 countries, CC-0001..CC-0024. Budget period = calendar year (2025 and 2026 rows via budget_period columns on one cost center row per year, or one row with two periods; see DEC-17). Budget amounts USD-equivalent between 50,000 and 400,000 drawn from the cost_centers stream, except CC-0024 (Legal-GB) fixed at 8,000 USD-equivalent to produce BUDGET_EXCEEDED cases. |
 | ASM-026 | Employment start dates uniform 2015-01-01 to 2026-09-30; about 5% (20) employees TERMINATED with employment_end inside 2025-01-01..2026-09-30; about 2% ON_LEAVE_OF_ABSENCE at AS_OF_DATE. |
@@ -369,7 +369,7 @@ Original proposals:
 |---|---|
 | ASM-P7A-01 | Routing inputs: the routing date is the submission date; the measure is the leave request's whole requested_quantity (all leave years together) or the claim's USD total; the category is the leave type or the claim's primary (highest-amount) category. Same as the oracle. |
 | ASM-P7A-02 | Delegation: of several delegations of one approver covering the routing date, the lowest delegation_id is used. A delegate who cannot act is substituted in turn (chain); delegated_from records the first person replaced by a delegate. |
-| ASM-P7A-03 | L4 needs exactly one finance controller in the requester's country and L5 exactly one G7 (AMB-P7A-01); two candidates for one role leave the level unresolved (AM-B9: never pick one). |
+| ASM-P7A-03 | L4 needs exactly one finance controller in the requester's country and L5 exactly one G7 in the requester's country (AMB-P7B-09; the AMB-P7A-01 fallback is removed); two candidates for one role leave the level unresolved (AM-B9: never pick one). |
 
 ### 11.2 Decisions
 
@@ -387,7 +387,7 @@ Original proposals:
 
 | ID | Ambiguity | Default applied |
 |---|---|---|
-| AMB-P7A-01 | Owner decision S19 option (a): L5 = the G7 of the requester's country. The dataset keeps one G7 for all countries until 7B, so most countries have no G7 of their own. | When the requester's country has no G7 and the organisation has exactly one, that G7 is L5 (today's single-CFO model, ASM-014). Two G7s in one country -> unresolved. After the 7B dataset change every country has its own G7 and this fallback never applies. |
+| AMB-P7A-01 | Owner decision S19 option (a): L5 = the G7 of the requester's country. The dataset keeps one G7 for all countries until 7B, so most countries have no G7 of their own. | When the requester's country has no G7 and the organisation has exactly one, that G7 is L5 (today's single-CFO model, ASM-014). Two G7s in one country -> unresolved. After the 7B dataset change every country has its own G7 and this fallback never applies. REMOVED in Phase 7B (AMB-P7B-09): routing and oracle use the per-country rule only. |
 | AMB-P7A-02 | Escalated requests (SOFT) are routed but have no steps yet. | The route is recorded in calculated_values; steps are created when the process owner sends the request on (7B). |
 | AMB-P7A-03 | A delegation whose delegate is the requester: substitution moves the requester up to the delegator, who was already visited. | Level unresolved -> NO_VALID_APPROVAL_PATH (same as the oracle). Alternative: continue with the delegator's manager (needs an oracle change too). |
 | AMB-P7A-04 | Writing approval_event ASSIGNED now (Phase 7A) or with the audit work (Phase 8). | Now, for step 1 only (DEC-P7A-06). |
@@ -407,7 +407,8 @@ Original proposals:
 | ASM-P7B-07 | An expense resubmission without new lines carries the current round's lines into the new round unchanged (new line numbers, DEC-11). |
 | ASM-P7B-08 | In the simulation the process owner who decides is the lowest employee id holding PROCESS_OWNER who is not the requester; the L4 path of docs/05 9.4 is available in the service but not used by the simulation. |
 | ASM-P7B-09 | NEGATIVE_BALANCE_UNPERMITTED examines only USAGE that never passed the submission balance check (legacy approvals). A request approved through the workflow was checked at submission against every open reservation, and approval only turns its reservation into usage. |
-| ASM-P7B-10 | A process owner's send-on creates steps from the route at the round's submission date (AMB-P7A-02). An approver whose employment ends between assignment and decision still decides in the simulation (no re-routing). See AMB-P7B-06. |
+| ASM-P7B-10 | A process owner's send-on creates steps from the route at the round's submission date (AMB-P7A-02). An approver whose employment ends between assignment and decision still decides in the simulation (no re-routing). See AMB-P7B-06; validation check V-WF-05 now reports such decisions (AMB-P7B-11). |
+| ASM-P7B-11 | S19 option (a) in data (AMB-P7B-09): stage S1, after manager assignment, promotes in each country without a G7 the lowest-id G6 that is ACTIVE, has no employment end and started on or before the window start; it becomes G7 with manager NULL and job title "Chief Financial Officer", keeping its department, head flag and reports. No random draws. At seed 20261022 / 400: EMP-000031 (US) and EMP-000181 (GB); EMP-000314 (IN) unchanged. |
 
 ### 12.2 Decisions
 
@@ -418,8 +419,9 @@ Original proposals:
 | DEC-P7B-03 | Stage S6 = the replays with routing and a DecisionTiming (DEC-01). It writes workflow_status, exception_class, decision_reason_code, the submission outputs and approved_amount, and seven tables that were empty before: cost_center_transaction, approval_step, approval_event, approval_attempt, request_status_event, request_exception, idempotency_record; the leave ledger is renumbered with USAGE and year-end rows and the snapshots recomputed. Ids follow time. detections.csv comes from the S6 replays (byte-identical to Phase 7A). | Keep the dataset at SUBMITTED. |
 | DEC-P7B-04 | The oracle has its own timing model (numpy keyed draws re-implemented, same rule as ASM-P7B-02, process owner from user_role): final_status is the status at as-of, eventual_status keeps the eventual outcome. A claim's reservation is released at the process owner's reject or return instant for claims submitted at or after it. | Eventual outcome only (cannot check timing). |
 | DEC-P7B-05 | expected_approved_amount and expected_reimbursement_eligibility follow the status at as-of: set only for claims APPROVED at as-of. | Eventual values. |
-| DEC-P7B-06 | Not in 7B: reimbursement rows at final approval and reimbursement_attempt (Phase 8), audit_event rows (Phase 8), the ESCALATE action of a step approver, cancellation, attempt scenarios S11/S12/S18 in the dataset, the S19 dataset change (waiting for owner OK). | |
+| DEC-P7B-06 | Not in 7B: reimbursement rows at final approval and reimbursement_attempt (Phase 8), audit_event rows (Phase 8), the ESCALATE action of a step approver, cancellation, attempt scenarios S11/S12/S18 in the dataset. | |
 | DEC-P7B-07 | Both comparisons also compare the status at as-of: services' S6 simulation = oracle = dataset, and the approved amount stored at approval. Seed and as-of come from data/manifest.json. | |
+| DEC-P7B-09 | S19 plants are split evenly over the G7s in employee-id order, the lowest ids taking the remainder (4 + 4 at 400 employees: EMP-000031 2 + 2, EMP-000181 1 + 1, EMP-000314 1 + 1). | Round-robin per plant; all on one G7. |
 | DEC-P7B-08 | A blocked attempt completes its idempotency key (docs/06 8.2 step 5); the same derived key with a different body raises IdempotencyConflict, so a retry after a block needs a new client key. | Let a blocked key be reused. |
 
 ### 12.3 Ambiguities found in Phase 7B (default APPLIED unless stated; please confirm or change)
@@ -434,4 +436,12 @@ Original proposals:
 | AMB-P7B-06 | Approver's employment ends after assignment, before the decision. | The assigned approver still decides (ASM-P7B-10). Alternative: escalate (docs/06 2.2 PENDING -> ESCALATED, system). Applied. |
 | AMB-P7B-07 | expected_approved_amount / eligibility at as-of or eventual. | At as-of (DEC-P7B-05). Applied. |
 | AMB-P7B-08 | Form of the year-end rows: full balance plus a negative expiry, or the capped amount only. | Full balance + expiry, both visible in the ledger (ASM-P7B-05). Applied. |
-| AMB-P7B-09 | S19: one G7 per country. | Plan shown in the Phase 7B report; NOT applied, waiting for the owner's OK. |
+| AMB-P7B-09 | S19: one G7 per country. | Owner decision 2026-10-28: option A (promote, ASM-P7B-11, DEC-P7B-09), accepting that S3 / S4 draws change. Condition 3 as amended by the owner: every planned count met and every planted actual unchanged; natural counts may move. Measured at seed 20261022 / 400: S04 actual 60 -> 62 (minimum 40), S14 actual 790 -> 788 (minimum 150), natural split-claim labels 2 -> 0 (the pair no longer occurs; not forced back); every planted count unchanged; no unplanted NO_VALID_APPROVAL_PATH. Applied. |
+| AMB-P7B-10 | A country with no ACTIVE G6 employed for the whole window (small scales, e.g. starter 40 employees at seed 20261023) cannot get a G7. | That country keeps no G7: the generator prints a WARNING and records it in manifest.json under countries_without_g7; requests needing L5 there have no valid path. Not reached at the full scale. Alternative: promote from G5. Applied; please confirm. |
+| AMB-P7B-11 | V-WF-05 (new, AMB-P7B-06) finds 1 decision after the approver's employment end: APR-EXP-2025-000483-02, decided 2025-12-17 17:00 UTC by EMP-000190, employment ended 2025-12-14. Allowed by ASM-P7B-10; did not occur at e15dc94 (0), appears with the S19 redraw. | NOT resolved: V-WF-05 stays FAIL (generate and python -m src.validation exit 1); pytest marks it strict xfail. Options: (1) the simulation escalates (or re-routes) a step whose approver has left before the decision time (docs/06 2.2 PENDING -> ESCALATED, system); (2) keep ASM-P7B-10 and make V-WF-05 informational. Proposed: (1), in Phase 8. Owner to decide. |
+
+### 12.4 Notes and lessons (Phase 7B, S19)
+
+- Lesson: G7s are excluded from the request-requester pool in S3 / S4 (a G7 requester has no approval path; that case is only planted as S19). Promoting people to G7 therefore changes the pools and every later draw of S3 / S4, so a structural change to who is G7 can never be "master data only".
+- Cosmetic synthetic-data quirk (owner 2026-10-28, keep): EMP-000181 (GB) is head of DEPT-05 and, after the promotion, has the job title "Chief Financial Officer". Routing is unaffected: one person resolved for several levels gets one step with covered_levels (in the dataset EMP-000181 holds L1, L2, L1+L2 in one step, and L3 steps; services = oracle on every record).
+- Before / after the S19 change (seed 20261022 / 400): employees G6 24 -> 22, G7 1 -> 3; approval_step 2548 -> 2547 (APPROVED 2506 -> 2518, PENDING 42 -> 29); leave at as-of APPROVED 755 -> 756, DRAFT 8 -> 7, ESCALATED 5 -> 6, PENDING 12 -> 11 (REJECTED 12, RETURNED 8 unchanged); expense APPROVED 893 -> 902, ESCALATED 19 -> 17, PENDING 20 -> 12, RETURNED 33 -> 34 (DRAFT 8, REJECTED 27 unchanged).

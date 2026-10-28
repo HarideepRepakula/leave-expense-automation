@@ -36,8 +36,8 @@ BEHAVIOUR = {
     "S01": "Legacy APPROVED request kept; ledger detector flags the balance below the permitted floor (SOFT)",
     "S02": "Both legacy APPROVED requests kept; batch detector flags the overlap on both (no automatic change)",
     "S03": "REJECTED at validation (HARD INSUFFICIENT_BALANCE)",
-    "S19-L": "ESCALATED_FOR_REVIEW (NO_VALID_APPROVAL_PATH: requester is the G7, no L1 exists)",
-    "S19-E": "ESCALATED_FOR_REVIEW (NO_VALID_APPROVAL_PATH: requester is the G7, no L1 exists)",
+    "S19-L": "ESCALATED_FOR_REVIEW (NO_VALID_APPROVAL_PATH: requester is a G7, no L1 exists)",
+    "S19-E": "ESCALATED_FOR_REVIEW (NO_VALID_APPROVAL_PATH: requester is a G7, no L1 exists)",
     "S22": "ESCALATED_FOR_REVIEW; process owner approves, routing resumes",
     "S23": "RETURNED_FOR_CORRECTION (CORRECTABLE)",
     "S05": "RETURNED_FOR_CORRECTION (CORRECTABLE)",
@@ -139,7 +139,7 @@ class Planter:
 class Anomalies(Planter):
     def run(self) -> None:
         wb = self.wb
-        self.root = next(e["employee_id"] for e in wb.emps.values() if e["grade"] == "G7")
+        self.g7s = sorted(e["employee_id"] for e in wb.emps.values() if e["grade"] == "G7")  # one per country
         self.legal_gb = sorted(e["employee_id"] for e in wb.emps.values()
                                if e["default_cost_center_id"] == "CC-0024")
         for e in self.legal_gb:                       # CC-0024 is reserved for S21 (budget arithmetic)
@@ -336,27 +336,34 @@ class Anomalies(Planter):
                        f"SICK {r['requested_quantity']} days with medical_cert_flag set to false")
             done += 1
 
+    def s19_quotas(self, n: int) -> list[tuple[str, int]]:
+        """S19 plants spread over the G7s (one per country, AMB-P7B-09): an even split in employee-id order,
+        the lowest ids taking any remainder. Deterministic; no draws."""
+        k = len(self.g7s)
+        return [(g7, n // k + (1 if j < n % k else 0)) for j, g7 in enumerate(self.g7s)]
+
     def s19_leave(self, n: int) -> None:
-        """No valid approval path: the requester is the G7, so no L1 exists. Never "L1 is the G7", which
+        """No valid approval path: the requester is a G7, so no L1 exists. Never "L1 is the G7", which
         resolves to one step (AMB-P3-03)."""
         wb = self.wb
-        done = 0
-        for r in self.leave_cands(lambda r: wb.same_country(r["employee_id"], self.root)
-                                  and r["employee_id"] != self.root and r["requested_quantity"] <= Decimal("3.0")):
-            if done == n:
-                break
-            old = r["employee_id"]
+        for root, quota in self.s19_quotas(n):
+            done = 0
+            for r in self.leave_cands(lambda r: wb.same_country(r["employee_id"], root)
+                                      and r["employee_id"] != root and r["requested_quantity"] <= Decimal("3.0")):
+                if done == quota:
+                    break
+                old = r["employee_id"]
 
-            def edit(r=r):
-                wb.reassign_leave(r, self.root)
-                return wb.leave_guard(self.root)
+                def edit(r=r, root=root):
+                    wb.reassign_leave(r, root)
+                    return wb.leave_guard(root)
 
-            if self.attempt([r["leave_request_id"]], [], edit):
-                wb.take(LEAVE, r["leave_request_id"], old)
-                self.plant("S19-L", LEAVE, r["leave_request_id"], {"NO_VALID_APPROVAL_PATH"},
-                           "request re-assigned to the G7 (top of chain, no L1)")
-                done += 1
-        wb.locked.add((LEAVE, self.root))
+                if self.attempt([r["leave_request_id"]], [], edit):
+                    wb.take(LEAVE, r["leave_request_id"], old)
+                    self.plant("S19-L", LEAVE, r["leave_request_id"], {"NO_VALID_APPROVAL_PATH"},
+                               "request re-assigned to a G7 (top of chain, no L1)")
+                    done += 1
+            wb.locked.add((LEAVE, root))
 
     def s24(self, kind: str, n: int) -> None:
         """Delegated route: the requester's manager has an active delegation on the submission date. Run once
@@ -445,18 +452,19 @@ class Anomalies(Planter):
     # --- expenses ------------------------------------------------------------------------------------------
     def s19_expense(self, n: int) -> None:
         wb = self.wb
-        done = 0
-        for c in self.claim_cands(lambda c: wb.same_country(c["employee_id"], self.root)
-                                  and wb.usd(c) >= USD_200 and wb.lines_fit(c, self.root)):
-            if done == n:
-                break
-            old = c["employee_id"]
-            wb.reassign_claim(c, self.root)
-            wb.take(EXPENSE, c["expense_claim_id"], old)
-            self.plant("S19-E", EXPENSE, c["expense_claim_id"], {"NO_VALID_APPROVAL_PATH"},
-                       "claim re-assigned to the G7 (top of chain, no L1)")
-            done += 1
-        wb.locked.add((EXPENSE, self.root))
+        for root, quota in self.s19_quotas(n):
+            done = 0
+            for c in self.claim_cands(lambda c: wb.same_country(c["employee_id"], root)
+                                      and wb.usd(c) >= USD_200 and wb.lines_fit(c, root)):
+                if done == quota:
+                    break
+                old = c["employee_id"]
+                wb.reassign_claim(c, root)
+                wb.take(EXPENSE, c["expense_claim_id"], old)
+                self.plant("S19-E", EXPENSE, c["expense_claim_id"], {"NO_VALID_APPROVAL_PATH"},
+                           "claim re-assigned to a G7 (top of chain, no L1)")
+                done += 1
+            wb.locked.add((EXPENSE, root))
 
     def s08(self, n: int) -> None:
         """Claim moved to a terminated employee of the same country; its latest line is dated after the
