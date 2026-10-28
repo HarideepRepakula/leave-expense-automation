@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "leave-expense-automation"
-version = "0.7.0"
+version = "0.8.0a1"
 description = "Enterprise Leave and Expense Approval Automation System (synthetic data, deterministic rules)"
 readme = "README.md"
 requires-python = ">=3.11"

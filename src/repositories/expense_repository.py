@@ -12,6 +12,9 @@ rows and the ASSIGNED approval_event (APE) are written for PENDING_APPROVAL.
 Phase 7B: the store is also a WorkflowStore (SqlWorkflow, base.py) for approval_service decisions: approved_amount
 at approval, RELEASE / OVERRIDE rows with committed_amount kept equal to the budget ledger, resubmission (new-round
 lines inserted, old lines kept, claim round and total updated) and idempotency_record rows.
+Phase 8: the store is also a ReimbursementStore (reimbursement_service): reimbursement rows (per-year RMB ids),
+reimbursement_attempt, processing_failure, ACTUAL / RELEASE at completion with actual_amount and committed_amount
+kept equal to the budget ledger, and audit_event rows (SqlWorkflow.record_audit).
 """
 from __future__ import annotations
 
@@ -19,12 +22,15 @@ from datetime import date
 
 import sqlalchemy as sa
 
-from src.common.enums import BudgetTxnType, RequestType, WorkflowStatus
-from src.repositories.base import SqlWorkflow, allocate_ids, load_router, next_step_sequence, table, \
-    write_events_and_exceptions, write_steps
+from src.common.enums import BudgetTxnType, ReimbursementStatus, RequestType, WorkflowStatus
+from src.repositories.base import SqlWorkflow, allocate_ids, allocate_year_ids, load_router, next_step_sequence, \
+    table, write_events_and_exceptions, write_steps
+from src.services import audit_service
 from src.services.approval_routing import ApprovalRouter
 from src.services.expense_service import DetectionParams, ExpenseContext, ExpenseSubmissionResult, apply_to_claim, \
-    approved_amount_of, claim_hashes, current_lines, override_postings, release_postings, top_line
+    approved_amount_of, claim_hashes, completion_postings, current_lines, override_postings, release_postings, \
+    top_line
+from src.services.reimbursement_service import DUPLICATE_REIMBURSEMENT, ReimbursementResult
 
 CLAIM_WRITES = ("workflow_status", "exception_class", "decision_reason_code", "first_submitted_at", "expense_policy_id",
                 "total_amount_usd", "fx_rate_used", "receipt_status", "current_round", "total_amount",
@@ -82,9 +88,70 @@ class SqlExpenseStore(SqlWorkflow):
     def post_decision_rows(self, res) -> None:
         self._post_budget(res.budget_postings, res.correlation_id)
 
+    # ReimbursementStore (reimbursement_service) -------------------------------------------------------------
+    def active_reimbursements(self, claim_id: str) -> list[dict]:
+        t = table("reimbursement")
+        return self._rows(sa.select(t).where(t.c.expense_claim_id == claim_id,
+                                             t.c.reimbursement_status != ReimbursementStatus.CANCELLED.value)
+                          .with_for_update())
+
+    def load_reimbursement(self, reimbursement_id: str) -> dict:
+        t = table("reimbursement")
+        return dict(self.conn.execute(sa.select(t).where(t.c.reimbursement_id == reimbursement_id)
+                                      .with_for_update()).mappings().one())
+
+    def reimbursement_attempts_of(self, reimbursement_id: str) -> list[dict]:
+        t = table("reimbursement_attempt")
+        return self._rows(sa.select(t).where(t.c.reimbursement_id == reimbursement_id).order_by(t.c.attempt_id))
+
+    def next_reimbursement_id(self, year: int) -> str:
+        return allocate_year_ids(self.conn, "reimbursement", "RMB", year, 1)[0]
+
+    def completion_postings(self, claim: dict, amount, at) -> list[dict]:
+        return completion_postings(claim, self._ledger_of(claim["expense_claim_id"]), amount, at)
+
+    def record_reimbursement(self, res: ReimbursementResult) -> None:
+        """Rows of one reimbursement call in the caller's transaction. A new row is inserted in a savepoint: a
+        violation of the partial unique index (a concurrent creation) becomes a BLOCKED DUPLICATE_REIMBURSEMENT
+        attempt instead (docs/06 8.4 step 5)."""
+        conn, t = self.conn, table("reimbursement")
+        if res.new_reimbursement is not None:
+            try:
+                with conn.begin_nested():
+                    conn.execute(sa.insert(t).values(res.new_reimbursement))
+            except sa.exc.IntegrityError as exc:
+                if "uq_reimbursement_active_per_claim" not in str(exc):
+                    raise
+                self._as_duplicate(res)
+        if res.update:
+            conn.execute(sa.update(t).where(t.c.reimbursement_id == res.reimbursement_id).values(res.update))
+        if res.attempts:
+            ids = allocate_ids(conn, "reimbursement_attempt", "RMA", len(res.attempts))
+            conn.execute(sa.insert(table("reimbursement_attempt")),
+                         [{"attempt_id": i, **a} for i, a in zip(ids, res.attempts)])
+        self._post_budget(res.budget_postings, res.correlation_id)
+        if res.failures:
+            ids = allocate_ids(conn, "processing_failure", "PFL", len(res.failures))
+            conn.execute(sa.insert(table("processing_failure")),
+                         [{"failure_id": i, **f} for i, f in zip(ids, res.failures)])
+        self.record_audit(res.audit_events)
+        if res.idempotency_row is not None:
+            self.record_idempotency(res.idempotency_row)
+
+    @staticmethod
+    def _as_duplicate(res: ReimbursementResult) -> None:
+        state = "APPROVED"
+        res.new_reimbursement, res.reimbursement_id = None, None
+        res.outcome, res.reason_code = "BLOCKED", DUPLICATE_REIMBURSEMENT
+        res.attempts = [{**res.attempts[-1], "reimbursement_id": None, "outcome": "BLOCKED",
+                         "reason_code": DUPLICATE_REIMBURSEMENT}]
+        res.audit_events = [audit_service.event("expense_claim", res.expense_claim_id, state, state, res.actor_id,
+                                                res.at, res.correlation_id, reason_code=DUPLICATE_REIMBURSEMENT,
+                                                values={"attempted_action": res.action, "outcome": "BLOCKED"})]
+
     def _post_budget(self, postings: list[dict], correlation_id) -> None:
-        """cost_center_transaction rows; committed_amount follows RESERVATION / RELEASE (V-ARITH-08). The budget
-        rows are locked before they change (BR-BUD-02)."""
+        """cost_center_transaction rows; committed_amount follows RESERVATION / RELEASE / ACTUAL and actual_amount
+        follows ACTUAL (V-ARITH-08). The budget rows are locked before they change (BR-BUD-02)."""
         if not postings:
             return
         t, b = table("cost_center_transaction"), table("cost_center_budget")
@@ -95,10 +162,14 @@ class SqlExpenseStore(SqlWorkflow):
         self.conn.execute(sa.insert(t), [{**p, "transaction_id": i, "correlation_id": correlation_id}
                                          for i, p in zip(ids, postings)])
         for p in postings:
-            sign = {BudgetTxnType.RESERVATION.value: 1, BudgetTxnType.RELEASE.value: -1}.get(p["txn_type"], 0)
+            sign = {BudgetTxnType.RESERVATION.value: 1, BudgetTxnType.RELEASE.value: -1,
+                    BudgetTxnType.ACTUAL.value: -1}.get(p["txn_type"], 0)
             if sign:
                 self.conn.execute(sa.update(b).where(b.c.cost_center_budget_id == p["cost_center_budget_id"])
                                   .values(committed_amount=b.c.committed_amount + sign * p["amount"]))
+            if p["txn_type"] == BudgetTxnType.ACTUAL.value:
+                self.conn.execute(sa.update(b).where(b.c.cost_center_budget_id == p["cost_center_budget_id"])
+                                  .values(actual_amount=b.c.actual_amount + p["amount"]))
 
     def next_step_sequence(self, claim_id: str) -> int:
         return next_step_sequence(self.conn, "expense_claim_id", claim_id)
@@ -164,5 +235,6 @@ class SqlExpenseStore(SqlWorkflow):
         write_events_and_exceptions(self.conn, common, result.events, result.findings, result.submitted_at)
         write_steps(self.conn, result.steps, result.correlation_id)
         self._post_budget(result.budget_postings, result.correlation_id)
+        self.record_audit(result.audit_events)
         if result.idempotency is not None:
             self.record_idempotency(result.idempotency)

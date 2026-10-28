@@ -20,7 +20,9 @@ total is recomputed over the new round's lines; a new RESERVATION is posted. Wit
 lines are carried into the new round unchanged (ASM-P7B-07). The claim id never changes.
 Decisions (approval_service): approved_amount (BR-EX-14) is stored at final approval from the stored line results
 (approved_amount_of); RELEASE of the open reservation on reject or return (BR-BUD-04); OVERRIDE when a process owner
-sends on a BUDGET_EXCEEDED claim (BR-BUD-06). Not here: reimbursement (Phase 8); audit_event rows (Phase 8).
+sends on a BUDGET_EXCEEDED claim (BR-BUD-06). Phase 8: every submission carries its audit_event rows
+(audit_service); the store is also a ReimbursementStore (reimbursement_service), and completion_postings() gives
+ACTUAL and RELEASE at a completed payment (BR-BUD-05).
 """
 from __future__ import annotations
 
@@ -33,11 +35,13 @@ from typing import Protocol
 from src.common import ids
 from src.common.enums import BudgetTxnType, LineValidationResult, ReceiptStatus, RequestType, WorkflowStatus
 from src.common.money import fx_rate_on
+from src.services import audit_service
 from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
 from src.services.approval_service import BUDGET_OVERRIDE, DecisionResult, IdempotentReplay, InMemoryWorkflow, \
     resubmission_key, resubmission_record
 from src.services.exception_service import Classification, ExceptionCatalogue, Finding, FindingSet
 from src.services.lifecycle import check_resubmission, check_transition
+from src.services.reimbursement_service import InMemoryReimbursements
 
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
@@ -168,6 +172,24 @@ def override_postings(claim: dict, ledger: list[dict], at: datetime) -> list[dic
              "txn_type": BudgetTxnType.OVERRIDE.value, "amount": claim["total_amount"], "currency": claim["currency"],
              "txn_date": at.date(), "posted_at": at, "reason_code": BUDGET_OVERRIDE}
             for b, (cc, _) in open_reservations(claim["expense_claim_id"], ledger).items()]
+
+
+def completion_postings(claim: dict, ledger: list[dict], amount: Decimal, at: datetime) -> list[dict]:
+    """BR-BUD-05 at a COMPLETED reimbursement: ACTUAL of the approved amount and RELEASE of what the claim's
+    reservation still holds beyond it, on the reservation's budget (several budgets in id order, ASM-P8-03).
+    Nothing when the claim holds no reservation."""
+    out, left = [], amount
+    for b, (cc, held) in open_reservations(claim["expense_claim_id"], ledger).items():
+        actual = min(held, left)
+        left -= actual
+        row = {"cost_center_id": cc, "cost_center_budget_id": b, "expense_claim_id": claim["expense_claim_id"],
+               "currency": claim["currency"], "txn_date": at.date(), "posted_at": at, "reason_code": None}
+        if actual > 0:
+            out.append({**row, "txn_type": BudgetTxnType.ACTUAL.value, "amount": actual})
+        if held - actual > 0:
+            out.append({**row, "txn_type": BudgetTxnType.RELEASE.value, "amount": held - actual,
+                        "reason_code": "REIMBURSEMENT_COMPLETED"})
+    return out
 
 
 def round_lines(claim: dict, previous: list[dict], new_lines: list[dict] | None, new_round: int) -> list[dict]:
@@ -370,6 +392,7 @@ class ExpenseSubmissionResult:
     steps: list[dict] = field(default_factory=list)   # approval_step rows (PENDING_APPROVAL only)
     changes: dict = field(default_factory=dict)       # resubmission: corrected claim columns and current_round
     idempotency: dict | None = None                   # resubmission: the completed idempotency_record
+    audit_events: list[dict] = field(default_factory=list)   # one per transition (Phase 8)
 
     @property
     def status(self) -> str:
@@ -401,6 +424,8 @@ class ExpenseStore(Protocol):
     def all_lines(self, claim_id: str) -> list[dict]: ...
 
     def add_round_lines(self, claim: dict, lines: list[dict]) -> None: ...
+
+    def record_audit(self, rows: list[dict]) -> None: ...
 
 
 def budget_postings(claim: dict, v: ExpenseValidation, budget: dict | None, status: str) -> list[dict]:
@@ -435,6 +460,8 @@ def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatal
         key = idempotency_key or resubmission_key(actor_id, claim_id, stored["current_round"] + 1)
         known = store.idempotency(actor_id, key)
         if known is not None:
+            store.record_audit([audit_service.replay_event(RequestType.EXPENSE.value, claim_id, None, None, actor_id,
+                                                           at, correlation_id, known["operation"])])
             raise IdempotentReplay(known)
         check_resubmission(stored, actor_id)
         body = {"request": claim_id, "changes": changes or {}, "lines": new_lines}
@@ -473,6 +500,7 @@ def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatal
                           "total_amount": claim["total_amount"]}
         result.idempotency = resubmission_record(actor_id, RequestType.EXPENSE.value, claim_id, key, body, at,
                                                  c.status_after_validation)
+    result.audit_events = audit_service.submission_events(RequestType.EXPENSE.value, claim, result)
     store.record_submission(result)
     return result
 
@@ -507,7 +535,7 @@ def apply_to_claim(claim: dict, lines: list[dict], result: ExpenseSubmissionResu
 
 
 # --- in-memory store -------------------------------------------------------------------------------------------
-class InMemoryExpenseStore(InMemoryWorkflow):
+class InMemoryExpenseStore(InMemoryWorkflow, InMemoryReimbursements):
     """An ExpenseStore and WorkflowStore over plain rows (generator guard, S6 simulation, unit tests). Same contract
     as the DB store. `roles`: employee id -> role names (process-owner decisions)."""
 
@@ -531,6 +559,7 @@ class InMemoryExpenseStore(InMemoryWorkflow):
         self.steps: dict[str, list[dict]] = {}
         self.approval_events: list[dict] = []
         self.init_workflow(roles)
+        self.init_reimbursements()
 
     def router(self) -> ApprovalRouter | None:
         return self._router
@@ -562,6 +591,9 @@ class InMemoryExpenseStore(InMemoryWorkflow):
 
     def post_decision_rows(self, res: DecisionResult) -> None:
         self.budget_ledger.extend(res.budget_postings)
+
+    def completion_postings(self, claim: dict, amount: Decimal, at: datetime) -> list[dict]:
+        return completion_postings(claim, self.budget_ledger, amount, at)
 
     def next_step_sequence(self, claim_id: str) -> int:
         return len(self.steps.get(claim_id, [])) + 1
@@ -614,6 +646,7 @@ class InMemoryExpenseStore(InMemoryWorkflow):
         apply_to_claim(claim, self.lines[cid], result)
         self.results[cid] = result
         self.budget_ledger.extend(result.budget_postings)
+        self.record_audit(result.audit_events)
         if result.idempotency is not None:
             self.record_idempotency(result.idempotency)
         for h in claim_hashes(current_lines(claim, self.lines[cid]), self.receipts):

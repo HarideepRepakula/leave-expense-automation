@@ -109,6 +109,11 @@ def receipt_id(n: int) -> str:
     return f"RCT-{n:09d}"
 
 
+def reimbursement_id(year: int, n: int) -> str:
+    """AM-A6: the year of the final approval."""
+    return f"RMB-{year}-{n:06d}"
+
+
 def user_id(n: int) -> str:
     return f"USR-{n:06d}"
 

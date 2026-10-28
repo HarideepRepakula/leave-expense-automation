@@ -5,6 +5,7 @@ outcome); Phase 7 adds the actor checks and the approval-step machine. Anything 
 """
 from __future__ import annotations
 
+from src.common.enums import ReimbursementStatus as R
 from src.common.enums import WorkflowStatus as S
 
 SYSTEM, REQUESTER, APPROVER, PROCESS_OWNER = "system", "requester", "step approver", "process owner"
@@ -34,8 +35,22 @@ TERMINAL = frozenset({S.APPROVED.value, S.REJECTED.value, S.CANCELLED.value})
 MAX_ROUNDS = 3   # ASM-025: a request returned in its third round stays RETURNED_FOR_CORRECTION
 
 
+PAYMENT_RUN, SYSTEM_ADMIN = "payment run", "system administrator"
+
+# Reimbursement state machine (docs/06 section 4, Phase 8). (from, to) -> (trigger, actor allowed); creation
+# (none -> ELIGIBLE) happens only at final approval or through create_reimbursement, so it is not a transition.
+REIMBURSEMENT_TRANSITIONS: dict[tuple[str, str], tuple[str, str]] = {
+    (R.ELIGIBLE, R.PROCESSING): ("payment run picks it up", PAYMENT_RUN),
+    (R.PROCESSING, R.COMPLETED): ("payment confirmed; ACTUAL posted", PAYMENT_RUN),
+    (R.PROCESSING, R.FAILED): ("payment failure; processing_failure row", PAYMENT_RUN),
+    (R.FAILED, R.PROCESSING): ("retry", PAYMENT_RUN),
+    (R.ELIGIBLE, R.CANCELLED): ("cancelled with a reason code", SYSTEM_ADMIN),
+    (R.FAILED, R.CANCELLED): ("cancelled with a reason code", SYSTEM_ADMIN),
+}
+
+
 class IllegalTransition(Exception):
-    """Raised for any transition not in REQUEST_TRANSITIONS (HTTP 409 in Phase 9)."""
+    """Raised for any transition not in REQUEST_TRANSITIONS or REIMBURSEMENT_TRANSITIONS (HTTP 409 in Phase 9)."""
 
 
 def check_transition(current: str, new: str) -> tuple[str, str]:
@@ -43,6 +58,13 @@ def check_transition(current: str, new: str) -> tuple[str, str]:
         return REQUEST_TRANSITIONS[(S(current), S(new))]
     except (KeyError, ValueError):
         raise IllegalTransition(f"{current} -> {new} is not a legal request transition") from None
+
+
+def check_reimbursement_transition(current: str, new: str) -> tuple[str, str]:
+    try:
+        return REIMBURSEMENT_TRANSITIONS[(R(current), R(new))]
+    except (KeyError, ValueError):
+        raise IllegalTransition(f"{current} -> {new} is not a legal reimbursement transition") from None
 
 
 def check_resubmission(r: dict, actor_id: str | None) -> None:

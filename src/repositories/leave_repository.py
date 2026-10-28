@@ -116,3 +116,4 @@ class SqlLeaveStore(SqlWorkflow):
                   "correlation_id": result.correlation_id}
         write_events_and_exceptions(self.conn, common, result.events, result.findings, result.submitted_at)
         write_steps(self.conn, result.steps, result.correlation_id)
+        self.record_audit(result.audit_events)

@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import Protocol
 
 from src.common.enums import LeaveType, RequestType, WorkflowStatus
+from src.services import audit_service
 from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
 from src.services.approval_service import DecisionResult, IdempotentReplay, InMemoryWorkflow, \
     resubmission_key, resubmission_record
@@ -215,6 +216,7 @@ class SubmissionResult:
     steps: list[dict] = field(default_factory=list)   # approval_step rows (PENDING_APPROVAL only)
     changes: dict = field(default_factory=dict)       # resubmission: corrected columns and the new current_round
     idempotency: dict | None = None                   # resubmission: the completed idempotency_record
+    audit_events: list[dict] = field(default_factory=list)   # one per transition (Phase 8)
 
     @property
     def status(self) -> str:
@@ -243,6 +245,8 @@ class LeaveStore(Protocol):
 
     def idempotency(self, actor_id: str, key: str) -> dict | None: ...
 
+    def record_audit(self, rows: list[dict]) -> None: ...
+
 
 def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalogue, at: datetime,
                  actor_id: str | None, correlation_id: uuid.UUID, changes: dict | None = None,
@@ -264,6 +268,8 @@ def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalog
         key = idempotency_key or resubmission_key(actor_id, request_id, stored["current_round"] + 1)
         known = store.idempotency(actor_id, key)
         if known is not None:
+            store.record_audit([audit_service.replay_event(RequestType.LEAVE.value, request_id, None, None, actor_id,
+                                                           at, correlation_id, known["operation"])])
             raise IdempotentReplay(known)
         check_resubmission(stored, actor_id)
         body = {"request": request_id, "changes": changes or {}}
@@ -299,6 +305,7 @@ def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalog
         result.changes = {**(changes or {}), "current_round": r["current_round"]}
         result.idempotency = resubmission_record(actor_id, RequestType.LEAVE.value, request_id, key, body, at,
                                                  classification.status_after_validation)
+    result.audit_events = audit_service.submission_events(RequestType.LEAVE.value, r, result)
     store.record_submission(result)
     return result
 
@@ -404,6 +411,7 @@ class InMemoryLeaveStore(InMemoryWorkflow):
                  first_submitted_at=r["first_submitted_at"] or result.submitted_at,
                  business_day_count=Decimal(v.business_days).quantize(Decimal("0.1")), requested_quantity=v.quantity)
         self.results[result.request_id] = result
+        self.record_audit(result.audit_events)
         if result.idempotency is not None:
             self.record_idempotency(result.idempotency)
         for e in result.events:

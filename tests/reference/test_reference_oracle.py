@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from src.data.generate import build
-from src.reference.oracle import Oracle, ReferenceConfig
+from src.reference.oracle import Expectation, Oracle, ReferenceConfig
 from src.services.leave_balance_service import accrual_schedule
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -209,3 +209,32 @@ def test_escalated_claim_keeps_its_budget_reservation_until_the_decision(tables)
     assert x["EXP-2026-000902"].eventual_status == "REJECTED"
     assert x["EXP-2026-000902"].final_status == "ESCALATED_FOR_REVIEW"     # no process owner in these tables
     assert x["EXP-2026-000903"].submission_codes == {"BUDGET_EXCEEDED"}
+
+
+# --- AMB-P7B-11 on the oracle side: the answer depends on the departed-approver reassignment ----------------------
+def reassignment_case(tables, as_of: date, end, boss: bool):
+    """EMP-000020 (G1) reports to EMP-000021 (G5), who reports to EMP-000022 (G6) when boss is True, else to nobody.
+    EMP-000021 is still employed on the submission date (Mon 2 March 2026, 09:00 UTC; routing picks them) and their
+    employment ends on `end`. Every delay is pinned to 1 business day, so by hand (ASM-P7B-02, ASM-P7B-12):
+    EMP-000021 would decide Tue 3 March 17:00; having left on 2 March, the step is reassigned at Tue 3 March 00:00
+    to EMP-000022, who decides Wed 4 March 17:00."""
+    t = dict(tables, employee=tables["employee"] + [
+        emp(20, "G1", 21), emp(21, "G5", 22 if boss else None, end=end), emp(22, "G6", None)])
+    o = Oracle(t, CONFIG, as_of=as_of)
+    o.delay = lambda key, kind: 1
+    x = Expectation("EXPENSE", "EXP-2026-000950", route=[
+        {"level": "L1", "approver_id": "EMP-000021", "covers": ["L1"], "delegated_from": None}])
+    return o.at_as_of(x, "EMP-000020", datetime(2026, 3, 2, 9, tzinfo=timezone.utc))[0]
+
+
+def test_status_at_as_of_depends_on_the_departed_approver_reassignment(tables):
+    left = date(2026, 3, 2)
+    # Without a reassignment the claim would be APPROVED by 4 March 00:00 (decision 3 March 17:00) ...
+    assert reassignment_case(tables, date(2026, 3, 4), None, boss=True) == "APPROVED"
+    # ... but EMP-000021 left on 2 March, so EMP-000022 decides only on 4 March 17:00.
+    assert reassignment_case(tables, date(2026, 3, 4), left, boss=True) == "PENDING_APPROVAL"
+    assert reassignment_case(tables, date(2026, 3, 5), left, boss=True) == "APPROVED"
+    # Nobody to take the step over: it stays pending however late the as-of date is.
+    assert reassignment_case(tables, date(2027, 1, 1), left, boss=False) == "PENDING_APPROVAL"
+    # Leaving after the decision changes nothing.
+    assert reassignment_case(tables, date(2026, 3, 4), date(2026, 3, 3), boss=True) == "APPROVED"

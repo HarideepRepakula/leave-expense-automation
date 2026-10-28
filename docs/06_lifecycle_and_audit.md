@@ -98,6 +98,8 @@ All steps for a round are created at routing time with step_status PENDING. assi
 
 eligibility_status is set once at creation (ELIGIBLE) and never changes; a claim that is not APPROVED cannot produce a row at all (attempt BLOCKED CLAIM_NOT_APPROVED).
 
+Phase 8A (src/services/reimbursement_service.py; table as data in lifecycle.REIMBURSEMENT_TRANSITIONS): creation guards in the order CLAIM_NOT_APPROVED, ZERO_APPROVED_AMOUNT (AMB-P8-01), DUPLICATE_REIMBURSEMENT, AMOUNT_MISMATCH; the CREATE at final approval has actor SYSTEM (ASM-P8-01); a COMPLETED attempt carries reason PAYMENT_COMPLETED (schema CHECK, ASM-P8-04); COMPLETED posts ACTUAL = approved_amount and RELEASE of the rest of the reservation (ASM-P8-03); CANCEL needs one of the three reasons and posts nothing (AMB-P8-02). Any other transition raises IllegalTransition.
+
 ## 5. Attempts (AM-H2)
 
 ### 5.1 approval_attempt
@@ -147,6 +149,8 @@ event_id (AUD-000000001), entity_type, entity_id, previous_state, new_state, act
 
 Every request transition, every step decision, every attempt (accepted or blocked), every reimbursement status change, every ledger posting (balance and budget), every master-data change through the API (policy, rule, user, delegation), every idempotent replay (IDEMPOTENT_REPLAY), every processing failure.
 
+Phase 8A (src/services/audit_service.py, row content ASM-P8-06): request transitions, attempts, steps changed by a decision, reassignments, replays, reimbursement creation / status changes / blocked attempts and processing failures are audited, in the same transaction as the change. Ledger postings and master-data changes are not yet (AMB-P8-03).
+
 ### 7.3 Immutability mechanisms
 
 1. Trigger raising on UPDATE and DELETE on audit_event, request_status_event, approval_event, approval_attempt, reimbursement_attempt, leave_balance_transaction, cost_center_transaction and request_exception. idempotency_record is not strictly append-only (its status moves IN_PROGRESS -> COMPLETED), so its trigger blocks DELETE and blocks changes to the key fields only (corrected in Phase 2).
@@ -190,7 +194,7 @@ Transaction:
 6. If ACCEPTED: update step (status, decision_at, reason, comment); insert approval_event; if APPROVE and more steps: set next step assigned_at, ASSIGNED event; if APPROVE and last step: request -> APPROVED, leave USAGE posting with leave_balance locked, or expense reimbursement row ELIGIBLE plus reimbursement_attempt CREATE ACCEPTED; if REJECT: request -> REJECTED, remaining steps SKIPPED, RELEASE posted; if RETURN: request -> RETURNED_FOR_CORRECTION, pending steps CANCELLED, RELEASE posted.
 7. request_status_event and audit_event rows; idempotency COMPLETED; commit.
 
-Phase 7B notes: a returning step becomes CANCELLED with an approval_event RETURNED (decision_at stays NULL, ASM-P7B-03). A blocked attempt completes its key; a retry needs a new client key (DEC-P7B-08). audit_event rows and the reimbursement of step 6 arrive in Phase 8.
+Phase 7B notes: a returning step becomes CANCELLED with an approval_event RETURNED (decision_at stays NULL, ASM-P7B-03). A blocked attempt completes its key; a retry needs a new client key (DEC-P7B-08). Phase 8A: the reimbursement of step 6 and the audit_event rows of steps 5 and 7 are written; a replay writes one IDEMPOTENT_REPLAY audit row. Cancellation by the requester (approval_service.cancel_request; DRAFT, PENDING_APPROVAL, RETURNED_FOR_CORRECTION) cancels pending steps, releases an expense reservation, and writes no attempt and no idempotency record (DEC-P8-04). A technical error rolls the use case back and records processing_failure in a second transaction (repositories/base.run_recording_failure, DEC-P8-06).
 
 ### 8.3 Resubmit
 

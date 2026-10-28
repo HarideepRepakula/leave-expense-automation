@@ -1,8 +1,8 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 7B (decisions, resubmission, process-owner decisions, S6 timing, CARRY_FORWARD rows)
-Status: COMPLETE including S19 option A (owner 2026-10-28) and AMB-P7B-11 option (1) (owner 2026-10-29; V-WF-05
-  PASS). Awaiting "APPROVED PHASE 7B".
+Current phase: Phase 8A (reimbursement and audit services; dataset unchanged)
+Status: 8A COMPLETE. Phase 8B (dataset) is planned in docs/09 13.4 and waits for the owner's OK on that plan.
+  Then "APPROVED PHASE 8" after 8B.
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -37,6 +37,64 @@ Phase 7 plan (owner 2026-10-28):
        Dataset change decided in 7B and shown to the owner BEFORE it is made; not touched in 7A.
   S22 timing (proposed for 7B): decisions at 17:00 UTC on a business day at least one business day after
        assignment, so an S22 partner submitted at most 24 h earlier is never decided first (closes AMB-P4-04).
+
+Phase 7B: APPROVED 2026-10-29 (commit ce59a2a). ASM-P7B-12 accepted.
+Phase 8 split (2026-10-29, owner allowed a split): 8A = carried-over items 1-2, reimbursement service, audit_event,
+  processing_failure, cancellation service, tests, docs, dataset plan; 8B = every dataset change (AMB-P7B-02/03/04,
+  S7 / S8 stages, S11-S13, S25, V-ARITH-04 and V-WF-03 on real rows), after the owner's OK on docs/09 13.4.
+
+## Phase 8A record
+
+Scope implemented: src/services/reimbursement_service.py (row at final approval inside the approval operation, only
+for APPROVED claims, guards CLAIM_NOT_APPROVED / ZERO_APPROVED_AMOUNT / DUPLICATE_REIMBURSEMENT / AMOUNT_MISMATCH,
+amount and currency = the claim's approved amount, manual create with key, payment run start / settle with keys,
+failure -> processing_failure, retry, COMPLETED -> ACTUAL + RELEASE, cancel with reason; state machine as data in
+lifecycle.REIMBURSEMENT_TRANSITIONS); src/services/audit_service.py (audit rows for submissions, decisions,
+attempts, steps changed, reassignments, replays, reimbursements, failures, written in the same transaction by all
+four stores); approval_service.cancel_request (needed for 8B cancellations); repositories/base.run_recording_failure
+(technical error -> rollback, processing_failure in a second transaction); unique-index race -> BLOCKED attempt
+(savepoint). Services import nothing from src/reference (test passes); ground truth untouched; workflow status,
+exception class, processing_failure and audit/attempt rows stay separate. Hash chain NOT done (DEC-P8-07).
+Carried over: (1) DB test for SqlWorkflow.record_reassignment: done. (2) hand-built oracle test where the status at
+as-of flips with the reassignment: done. (3) Phase 8 must-include items: all three are dataset changes, planned for
+8B in docs/09 13.4 (not applied).
+
+Files created: src/services/{reimbursement_service,audit_service,idempotency}.py;
+tests/unit/test_reimbursement_and_audit.py; tests/db/test_reimbursement_and_audit_db.py.
+Files changed: src/services/{approval_service,expense_service,leave_request_service,lifecycle}.py;
+src/repositories/{base,expense_repository,leave_repository}.py; src/common/ids.py; tests/db/test_leave_submission_db.py
+(AUD scope); tests/reference/test_reference_oracle.py (new test); docs/06, 09 (12 approved, 13 new), 15;
+pyproject.toml (0.8.0a1). No migration, no new packages, no data change.
+
+Commands:
+    python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+    python -m src.validation
+    python -m src.evaluation.leave_service_vs_oracle
+    python -m src.evaluation.expense_service_vs_oracle
+    .\scripts\reproducibility_check.ps1
+    pytest -q
+
+REAL results (2026-10-29):
+- Generate --load: exit 0; every lea_dev count = generated (unchanged from 7B); fingerprint
+  28ece8554f97a48e6323ef032ff926919596a80ff5f2b5da3ebe2fc9edf42dfa = 7B; git shows no change under data/.
+- Validation: 22 checks, 0 failed, 2 not applicable (V-ARITH-04, V-WF-03: no reimbursement rows until 8B);
+  M1 0/48254, M2 0/79435, M3 6981/6981.
+- Leave comparison: 800 AGREE, 0 DISAGREE. Expense comparison: 1000 AGREE, 0 DISAGREE.
+- reproducibility_check.ps1: 68 files, 68 identical, RESULT: REPRODUCIBLE, exit 0.
+- pytest -q: 482 passed in 54.40s (465 + 17 new). ruff --select F,E9 src tests migrations: All checks passed.
+Debugging: (1) test_second_submission... pinned the id_sequence scopes; submissions now also allocate AUD ids:
+expectation updated. (2) DB test: CHECK non_accepted_has_reason rejected a COMPLETED attempt without a reason
+(the in-memory store cannot see it); fix: reason PAYMENT_COMPLETED (ASM-P8-04). (3) a payment-run replay was
+audited on the claim instead of the reimbursement; fixed. (4) a process-owner decision got two audit rows for one
+transition; fixed (ASM-P8-06). (5) my unit test data hit DUPLICATE_CLAIM_PATTERN (same total and date); test fixed.
+
+Open issues / for owner decision: the 8B plan and questions (a)-(e) in docs/09 13.4; AMB-P8-01..05 (defaults
+applied); JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
+
+Acceptance criteria after 8A: 14 reimbursements only for eligible approved claims: PARTIAL (service + trigger +
+tests; dataset rows in 8B); 15 duplicate reimbursement prevented: MET at service and DB level (guard, partial unique
+index, race converted, idempotent replay; dataset S13 in 8B); 16 audit history: PARTIAL (audit_event written by every
+service path, append-only trigger; dataset rows in 8B); others as after 7B.
 
 ## Phase 7B record
 

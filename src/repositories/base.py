@@ -5,8 +5,9 @@ from __future__ import annotations
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from src.common.enums import DetectedBy
+from src.common.enums import DetectedBy, RoleName
 from src.models import Base
+from src.services import audit_service
 from src.services.approval_routing import ApprovalRouter, assignment_event
 
 
@@ -69,15 +70,21 @@ def write_events_and_exceptions(conn: sa.Connection, common: dict, events: list[
 
 
 def allocate_ledger_ids(conn: sa.Connection, year: int, n: int) -> list[str]:
-    """n consecutive leave ledger ids LBT-<year>-000001 (scope LBT-<year> in id_sequence, created from the highest
-    id of that year already in the table, DEC-P5-07)."""
+    """n consecutive leave ledger ids LBT-<year>-000001 (DEC-P5-07)."""
+    return allocate_year_ids(conn, "leave_balance_transaction", "LBT", year, n)
+
+
+def allocate_year_ids(conn: sa.Connection, table_name: str, base: str, year: int, n: int) -> list[str]:
+    """n consecutive ids <BASE>-<year>-000001 (scope <BASE>-<year> in id_sequence, created from the highest id of
+    that year already in the table, DEC-P5-07): leave ledger (LBT) and reimbursement (RMB, AM-A6) ids."""
     if n == 0:
         return []
-    seq, lt = table("id_sequence"), table("leave_balance_transaction")
-    scope, prefix = f"LBT-{year}", f"LBT-{year}-"
-    highest = sa.select(sa.func.coalesce(sa.func.max(sa.cast(sa.func.substr(lt.c.transaction_id, len(prefix) + 1),
+    seq, lt = table("id_sequence"), table(table_name)
+    pk = list(lt.primary_key.columns)[0]
+    scope, prefix = f"{base}-{year}", f"{base}-{year}-"
+    highest = sa.select(sa.func.coalesce(sa.func.max(sa.cast(sa.func.substr(pk, len(prefix) + 1),
                                                              sa.Integer)), 0) + 1) \
-        .where(lt.c.transaction_id.like(prefix + "%")).scalar_subquery()
+        .where(pk.like(prefix + "%")).scalar_subquery()
     conn.execute(pg_insert(seq).values(sequence_scope=scope, next_value=highest)
                  .on_conflict_do_nothing(index_elements=["sequence_scope"]))
     first = conn.execute(sa.select(seq.c.next_value).where(seq.c.sequence_scope == scope)
@@ -101,8 +108,16 @@ class SqlWorkflow:
         return [dict(r) for r in self.conn.execute(sa.select(at).where(at.c.request_id == request_id)).mappings()]
 
     def user_of(self, employee_id: str) -> str:
+        """The idempotency scope of an actor: the employee's user; for SYSTEM (payment runs, Phase 8) the
+        lowest-id user holding SYSTEM_ADMIN (ASM-P8-02)."""
         u = table("application_user")
-        found = self.conn.execute(sa.select(u.c.user_id).where(u.c.employee_id == employee_id)).scalar_one_or_none()
+        if employee_id == audit_service.SYSTEM:
+            ur, r = table("user_role"), table("role")
+            found = self.conn.execute(sa.select(sa.func.min(ur.c.user_id)).join(r, r.c.role_id == ur.c.role_id)
+                                      .where(r.c.role_name == RoleName.SYSTEM_ADMIN.value)).scalar_one_or_none()
+        else:
+            found = self.conn.execute(sa.select(u.c.user_id).where(u.c.employee_id == employee_id)) \
+                .scalar_one_or_none()
         if found is None:
             raise ValueError(f"{employee_id} has no application_user (idempotency scope is the user)")
         return found
@@ -146,9 +161,10 @@ class SqlWorkflow:
         events, request columns and the type's postings, all in the caller's transaction (append-only tables only
         receive inserts; only PENDING steps are updated, the trigger freezes decided ones)."""
         conn = self.conn
-        conn.execute(sa.insert(table("approval_attempt")).values(
-            attempt_id=allocate_ids(conn, "approval_attempt", "APA", 1)[0], **res.attempt))
-        self.record_idempotency(res.idempotency_row)
+        if res.attempt is not None:                  # a cancellation has neither attempt nor key
+            conn.execute(sa.insert(table("approval_attempt")).values(
+                attempt_id=allocate_ids(conn, "approval_attempt", "APA", 1)[0], **res.attempt))
+            self.record_idempotency(res.idempotency_row)
         st = table("approval_step")
         for u in res.step_updates:
             conn.execute(sa.update(st).where(st.c.approval_step_id == u["approval_step_id"])
@@ -168,12 +184,49 @@ class SqlWorkflow:
             t = table(self.request_table)
             conn.execute(sa.update(t).where(t.c[self.fk] == res.request_id).values(res.request_updates))
         self.post_decision_rows(res)
+        self.record_audit(res.audit_events)
+        if res.reimbursement is not None:          # after the claim row is APPROVED (eligibility trigger)
+            self.record_reimbursement(res.reimbursement)
 
-    def record_reassignment(self, request_id: str, step_update: dict, event: dict) -> None:
-        """AMB-P7B-11: the PENDING step's new approver and one REASSIGNED approval_event, in the caller's
-        transaction."""
+    def record_reassignment(self, request_id: str, step_update: dict, event: dict, audit: dict) -> None:
+        """AMB-P7B-11: the PENDING step's new approver, one REASSIGNED approval_event and its audit row, in the
+        caller's transaction."""
         st = table("approval_step")
         self.conn.execute(sa.update(st).where(st.c.approval_step_id == step_update["approval_step_id"])
                           .values({k: v for k, v in step_update.items() if k != "approval_step_id"}))
         self.conn.execute(sa.insert(table("approval_event")).values(
             approval_event_id=allocate_ids(self.conn, "approval_event", "APE", 1)[0], **event))
+        self.record_audit([audit])
+
+    def record_audit(self, rows: list[dict]) -> None:
+        write_audit(self.conn, rows)
+
+
+def write_audit(conn: sa.Connection, rows: list[dict]) -> None:
+    """audit_event rows (append-only, AUD ids from id_sequence), in the caller's transaction."""
+    if rows:
+        ids = allocate_ids(conn, "audit_event", "AUD", len(rows))
+        conn.execute(sa.insert(table("audit_event")), [{"event_id": i, **r} for i, r in zip(ids, rows)])
+
+
+TECHNICAL = (sa.exc.OperationalError, sa.exc.InterfaceError, sa.exc.InternalError, TimeoutError, ConnectionError)
+
+
+def run_recording_failure(engine: sa.Engine, operation: str, entity_type: str | None, entity_id: str | None,
+                          at, correlation_id, work):
+    """docs/06 6 and 8: run work(conn) in one transaction. A technical error (TECHNICAL, or LedgerMismatch /
+    PolicyConfigurationError raised as RuntimeError) rolls it back; a processing_failure row and its audit row are
+    then written in a second short transaction with the same correlation_id, and the error is raised again.
+    Business refusals (IllegalTransition, IdempotencyConflict, ValueError) are not technical and pass through."""
+    try:
+        with engine.begin() as conn:
+            return work(conn)
+    except (*TECHNICAL, RuntimeError) as exc:
+        failure = {"entity_type": entity_type, "entity_id": entity_id, "operation": operation,
+                   "error_code": type(exc).__name__, "error_message": str(exc)[:500], "occurred_at": at,
+                   "correlation_id": correlation_id, "resolution_status": "OPEN"}
+        with engine.begin() as conn:
+            conn.execute(sa.insert(table("processing_failure")).values(
+                failure_id=allocate_ids(conn, "processing_failure", "PFL", 1)[0], **failure))
+            write_audit(conn, [audit_service.failure_event(failure)])
+        raise

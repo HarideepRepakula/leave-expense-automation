@@ -17,12 +17,13 @@ leave and expense stores, and the PostgreSQL stores in src/repositories) and fol
    OVERRIDE when a process owner sends on a BUDGET_EXCEEDED claim (BR-BUD-06).
 
 Business rules that depend on the request type live in leave_request_service / expense_service; the store only
-loads the rows they need. Reimbursement rows (expense approval) arrive with Phase 8 (DEC-P7B-06).
+loads the rows they need. Phase 8: the final approval of an expense claim also builds its reimbursement
+(reimbursement_service.on_final_approval, docs/06 8.2 step 6), and every call carries its audit_event rows
+(audit_service): the attempt, the steps it changed and the request transitions; a replay writes one
+IDEMPOTENT_REPLAY audit row and nothing else.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,8 +41,11 @@ from src.common.enums import (
     StepStatus,
     WorkflowStatus,
 )
+from src.services import audit_service
 from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
-from src.services.lifecycle import check_transition
+from src.services.idempotency import IdempotencyConflict, IdempotentReplay, body_hash, sha256_hex  # noqa: F401
+from src.services.lifecycle import IllegalTransition, check_transition
+from src.services.reimbursement_service import ReimbursementResult, on_final_approval
 
 S = WorkflowStatus
 ACTIONS = (AttemptedAction.APPROVE.value, AttemptedAction.REJECT.value, AttemptedAction.RETURN.value)
@@ -52,25 +56,8 @@ PROCESS_OWNER_ACCEPTED = "PROCESS_OWNER_ACCEPTED"
 BUDGET_OVERRIDE = "BUDGET_OVERRIDE"
 
 
-class IdempotencyConflict(Exception):
-    """The idempotency key was already used for a different request body (HTTP 409)."""
-
-
-class IdempotentReplay(Exception):
-    """A resubmission whose key is already recorded: nothing is written (HTTP 200 with the stored response in
-    Phase 9). Carries the stored idempotency record."""
-
-    def __init__(self, record: dict) -> None:
-        super().__init__(f"idempotency key {record['idempotency_key'][:12]}... already completed")
-        self.record = record
-
-
 class DecisionRefused(Exception):
     """A process owner cannot send on a request without a valid approval path (HTTP 409); nothing is written."""
-
-
-def sha256_hex(*parts) -> str:
-    return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()
 
 
 def step_key(actor_id: str, step_id: str, action: str, submission_round: int) -> str:
@@ -86,10 +73,6 @@ def escalated_key(actor_id: str, request_id: str, action: str, submission_round:
 def resubmission_key(actor_id: str, request_id: str, next_round: int) -> str:
     """docs/06 8.3: SHA-256(actor_id | request_id | (current_round + 1))."""
     return sha256_hex(actor_id, request_id, next_round)
-
-
-def body_hash(body: dict) -> str:
-    return hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def resubmission_record(actor_id: str, request_type: str, request_id: str, key: str, body: dict,
@@ -122,6 +105,8 @@ class DecisionResult:
     request_updates: dict = field(default_factory=dict)         # columns of the request row
     leave_postings: list[dict] = field(default_factory=list)    # USAGE rows, unnumbered
     budget_postings: list[dict] = field(default_factory=list)   # RELEASE / OVERRIDE rows, unnumbered
+    reimbursement: ReimbursementResult | None = None            # final expense approval (Phase 8)
+    audit_events: list[dict] = field(default_factory=list)      # audit_event payloads, unnumbered
 
     @property
     def new_status(self) -> str | None:
@@ -166,7 +151,9 @@ class WorkflowStore(Protocol):
 
     def record_decision(self, result: DecisionResult) -> None: ...
 
-    def record_reassignment(self, request_id: str, step_update: dict, event: dict) -> None: ...
+    def record_reassignment(self, request_id: str, step_update: dict, event: dict, audit: dict) -> None: ...
+
+    def record_audit(self, rows: list[dict]) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -200,8 +187,9 @@ def _fk(request_type: str, request_id: str) -> dict:
 
 
 def _start(store: WorkflowStore, request_id: str, actor_id: str, action: str, at: datetime,
-           correlation_id: uuid.UUID, key: str, body: dict) -> DecisionResult | None:
-    """Idempotency (docs/06 8.2 step 1). Returns a replay result, or None to go on."""
+           correlation_id: uuid.UUID, key: str, body: dict, step_id: str | None) -> DecisionResult | None:
+    """Idempotency (docs/06 8.2 step 1). Returns a replay result (after its IDEMPOTENT_REPLAY audit row), or None
+    to go on."""
     if action not in ACTIONS:
         raise ValueError(f"unsupported action {action}")
     known = store.idempotency(actor_id, key)
@@ -209,8 +197,13 @@ def _start(store: WorkflowStore, request_id: str, actor_id: str, action: str, at
         return None
     if known["request_hash"] != body_hash(body):
         raise IdempotencyConflict(f"idempotency key {key[:12]}... was used for a different request")
-    return DecisionResult(store.request_type, request_id, 0, actor_id, action, at, correlation_id, key,
-                          known["request_hash"], replayed=True)
+    res = DecisionResult(store.request_type, request_id, 0, actor_id, action, at, correlation_id, key,
+                         known["request_hash"], replayed=True)
+    res.audit_events.append(audit_service.replay_event(
+        store.request_type, request_id, "approval_step" if step_id else None, step_id, actor_id, at, correlation_id,
+        IdempotencyOperation.APPROVE.value))
+    store.record_audit(res.audit_events)
+    return res
 
 
 def _attempt(res: DecisionResult, step_id: str | None) -> dict:
@@ -235,21 +228,32 @@ def _transition(res: DecisionResult, r: dict, new: str, reason: str | None, valu
     res.request_updates["decision_reason_code"] = None if new == S.PENDING_APPROVAL else reason
 
 
-def _finish(store: WorkflowStore, res: DecisionResult, r: dict, new: str, reason: str | None) -> None:
-    """Final effects of APPROVED / REJECTED / RETURNED_FOR_CORRECTION (docs/06 2.3)."""
+def _finish(store: WorkflowStore, res: DecisionResult, r: dict, new: str, reason: str | None,
+            final_step: str | None = None) -> None:
+    """Final effects of APPROVED / REJECTED / RETURNED_FOR_CORRECTION (docs/06 2.3). An approved expense claim
+    gets its reimbursement in the same transaction (docs/06 8.2 step 6)."""
     _transition(res, r, new, reason)
     if new == S.APPROVED:
         columns, postings = store.approval_effects(r, res.at)
         res.request_updates.update(columns)
         res.leave_postings.extend(postings)
+        if store.request_type == RequestType.EXPENSE:
+            res.reimbursement = on_final_approval(store, {**r, **res.request_updates}, final_step, res.at,
+                                                  res.correlation_id)
     else:
         res.budget_postings.extend(store.release_postings(r, res.at, new))
 
 
-def _blocked(store: WorkflowStore, res: DecisionResult, reason: str, step_id: str | None) -> DecisionResult:
-    res.outcome, res.reason_code = AttemptOutcome.BLOCKED.value, reason
-    res.attempt = _attempt(res, step_id)
+def _record(store: WorkflowStore, res: DecisionResult, r: dict, step: dict | None, rule_id: str | None) -> None:
+    res.audit_events = audit_service.decision_events(res, r, step, rule_id)
     store.record_decision(res)
+
+
+def _blocked(store: WorkflowStore, res: DecisionResult, reason: str, r: dict, step: dict | None,
+             rule_id: str | None = None) -> DecisionResult:
+    res.outcome, res.reason_code = AttemptOutcome.BLOCKED.value, reason
+    res.attempt = _attempt(res, step["approval_step_id"] if step else None)
+    _record(store, res, r, step, rule_id)
     return res
 
 
@@ -292,7 +296,7 @@ def decide_step(store: WorkflowStore, request_id: str, step_id: str, actor_id: s
     rnd = r["current_round"]
     key = idempotency_key or step_key(actor_id, step_id, action, rnd)
     body = {"step": step_id, "action": action, "reason": reason_code, "comment": comment}
-    replay = _start(store, request_id, actor_id, action, at, correlation_id, key, body)
+    replay = _start(store, request_id, actor_id, action, at, correlation_id, key, body, step_id)
     if replay is not None:
         return replay
     steps = store.steps_of(request_id)
@@ -305,19 +309,19 @@ def decide_step(store: WorkflowStore, request_id: str, step_id: str, actor_id: s
     requester = router.org.employees[r["employee_id"]]
     same_round = [s for s in steps if s["submission_round"] == rnd]
     if actor_id == r["employee_id"]:
-        return _blocked(store, res, BlockedReason.SELF_APPROVAL.value, step_id)
+        return _blocked(store, res, BlockedReason.SELF_APPROVAL.value, r, step)
     if not holds_step(router, step, actor_id, requester):
-        return _blocked(store, res, BlockedReason.UNAUTHORIZED_APPROVER.value, step_id)
+        return _blocked(store, res, BlockedReason.UNAUTHORIZED_APPROVER.value, r, step)
     if any(a["approval_step_id"] == step_id and a["actor_id"] == actor_id and a["attempted_action"] == action
            and a["outcome"] == AttemptOutcome.ACCEPTED for a in store.attempts_of(request_id)):
-        return _blocked(store, res, BlockedReason.DUPLICATE_ACTION.value, step_id)
+        return _blocked(store, res, BlockedReason.DUPLICATE_ACTION.value, r, step)
     if step["step_status"] != StepStatus.PENDING or step["submission_round"] != rnd \
             or r["workflow_status"] != S.PENDING_APPROVAL:
-        return _blocked(store, res, BlockedReason.STEP_NOT_PENDING.value, step_id)
+        return _blocked(store, res, BlockedReason.STEP_NOT_PENDING.value, r, step)
     if any(s["sequence_no"] < step["sequence_no"] and s["step_status"] == StepStatus.PENDING for s in same_round):
-        return _blocked(store, res, BlockedReason.LEVEL_SKIPPED.value, step_id)
+        return _blocked(store, res, BlockedReason.LEVEL_SKIPPED.value, r, step)
     if not _rule_effective(router, step["approval_rule_id"], at.date()):
-        return _blocked(store, res, BlockedReason.EXPIRED_RULE.value, step_id)
+        return _blocked(store, res, BlockedReason.EXPIRED_RULE.value, r, step)
 
     res.outcome = AttemptOutcome.ACCEPTED.value
     res.attempt = _attempt(res, step_id)
@@ -333,7 +337,7 @@ def decide_step(store: WorkflowStore, request_id: str, step_id: str, actor_id: s
             res.step_updates.append({"approval_step_id": nxt, "assigned_at": at})
             res.approval_events.append(_event(res, nxt, ApprovalEventType.ASSIGNED.value, None))
         else:
-            _finish(store, res, r, S.APPROVED.value, reason_code)
+            _finish(store, res, r, S.APPROVED.value, reason_code, step_id)
     elif action == AttemptedAction.REJECT:
         res.step_updates.append({"approval_step_id": step_id, "step_status": StepStatus.REJECTED.value,
                                  "decision_at": at, "decision_reason_code": reason_code, "decision_comment": comment})
@@ -354,7 +358,7 @@ def decide_step(store: WorkflowStore, request_id: str, step_id: str, actor_id: s
                                      "step_status": StepStatus.CANCELLED.value})
             res.approval_events.append(_event(res, s["approval_step_id"], ApprovalEventType.CANCELLED.value, None))
         _finish(store, res, r, S.RETURNED_FOR_CORRECTION.value, reason_code or DEFAULT_REASON[action])
-    store.record_decision(res)
+    _record(store, res, r, step, step["approval_rule_id"])
     return res
 
 
@@ -387,7 +391,8 @@ def reassign_departed(store: WorkflowStore, request_id: str, step_id: str, at: d
     store.record_reassignment(request_id, update, {
         "approval_step_id": step_id, "event_type": ApprovalEventType.REASSIGNED.value, "actor_id": None,
         "occurred_at": at, "reason_code": APPROVER_EMPLOYMENT_ENDED, "comment": f"{old} -> {new}",
-        "correlation_id": correlation_id})
+        "correlation_id": correlation_id},
+        audit_service.reassignment_event(step, old, new, at, correlation_id, APPROVER_EMPLOYMENT_ENDED))
     return new
 
 
@@ -414,7 +419,7 @@ def decide_escalated(store: WorkflowStore, request_id: str, actor_id: str, actio
     rnd = r["current_round"]
     key = idempotency_key or escalated_key(actor_id, request_id, action, rnd)
     body = {"escalated": request_id, "action": action, "reason": reason_code, "comment": comment}
-    replay = _start(store, request_id, actor_id, action, at, correlation_id, key, body)
+    replay = _start(store, request_id, actor_id, action, at, correlation_id, key, body, None)
     if replay is not None:
         return replay
     res = DecisionResult(store.request_type, request_id, rnd, actor_id, action, at, correlation_id, key,
@@ -422,26 +427,30 @@ def decide_escalated(store: WorkflowStore, request_id: str, actor_id: str, actio
     router = store.router()
     codes = store.round_codes(request_id, rnd)
     if actor_id == r["employee_id"]:
-        return _blocked(store, res, BlockedReason.SELF_APPROVAL.value, None)
+        return _blocked(store, res, BlockedReason.SELF_APPROVAL.value, r, None)
     if not may_decide_escalated(store, router, r, actor_id, codes):
-        return _blocked(store, res, BlockedReason.UNAUTHORIZED_APPROVER.value, None)
+        return _blocked(store, res, BlockedReason.UNAUTHORIZED_APPROVER.value, r, None)
     if any(a["approval_step_id"] is None and a["actor_id"] == actor_id and a["attempted_action"] == action
            and a["submission_round"] == rnd and a["outcome"] == AttemptOutcome.ACCEPTED
            for a in store.attempts_of(request_id)):
-        return _blocked(store, res, BlockedReason.DUPLICATE_ACTION.value, None)
+        return _blocked(store, res, BlockedReason.DUPLICATE_ACTION.value, r, None)
     if r["workflow_status"] != S.ESCALATED_FOR_REVIEW:
-        return _blocked(store, res, BlockedReason.STEP_NOT_PENDING.value, None)
+        return _blocked(store, res, BlockedReason.STEP_NOT_PENDING.value, r, None)
 
     res.outcome = AttemptOutcome.ACCEPTED.value
+    rule_id = None
     if action == AttemptedAction.APPROVE:
         steps = [s for s in store.steps_of(request_id) if s["submission_round"] == rnd]
         if steps and all(s["step_status"] == StepStatus.APPROVED for s in steps):
-            _finish(store, res, r, S.APPROVED.value, reason_code or PROCESS_OWNER_ACCEPTED)
+            last = max(steps, key=lambda s: s["sequence_no"])
+            rule_id = last["approval_rule_id"]
+            _finish(store, res, r, S.APPROVED.value, reason_code or PROCESS_OWNER_ACCEPTED, last["approval_step_id"])
         else:
             category, measure, on = store.routing_inputs(r)
             routing: Routing = router.route(store.request_type, r["employee_id"], category, measure, on)
             if routing.finding is not None:
                 raise DecisionRefused(f"{request_id}: {routing.finding.code} ({routing.finding.detail})")
+            rule_id = routing.rule_id
             override = "BUDGET_EXCEEDED" in codes
             reason = reason_code or (BUDGET_OVERRIDE if override else PROCESS_OWNER_ACCEPTED)
             res.new_steps = build_steps(store.request_type, request_id, rnd, routing, at,
@@ -454,7 +463,36 @@ def decide_escalated(store: WorkflowStore, request_id: str, actor_id: str, actio
         new = S.REJECTED.value if action == AttemptedAction.REJECT else S.RETURNED_FOR_CORRECTION.value
         _finish(store, res, r, new, reason_code or DEFAULT_REASON[action])
     res.attempt = _attempt(res, None)
-    store.record_decision(res)
+    _record(store, res, r, None, rule_id)
+    return res
+
+
+# --- cancellation by the requester (docs/06 2.2 and 2.3; ASM-040) ------------------------------------------------
+REQUESTER_CANCELLED = "REQUESTER_CANCELLED"
+
+
+def cancel_request(store: WorkflowStore, request_id: str, actor_id: str, at: datetime, correlation_id: uuid.UUID,
+                   reason_code: str | None = None) -> DecisionResult:
+    """The requester withdraws a DRAFT, PENDING_APPROVAL or RETURNED_FOR_CORRECTION request (Phase 8). Pending
+    steps of the round become CANCELLED (approval_event CANCELLED, actor NULL); an expense claim RELEASEs what it
+    still holds (BR-BUD-04); one status event and its audit rows. Anyone but the requester, or any other status,
+    raises IllegalTransition. Not an approval action: no approval_attempt and no idempotency record (a repeat finds
+    CANCELLED, which is terminal, DEC-P8-04)."""
+    r = store.load_request(request_id)
+    if actor_id != r["employee_id"]:
+        raise IllegalTransition("only the requester may cancel")
+    rnd = r["current_round"]
+    res = DecisionResult(store.request_type, request_id, rnd, actor_id, "CANCEL", at, correlation_id, "", "",
+                         outcome=AttemptOutcome.ACCEPTED.value)
+    _transition(res, r, S.CANCELLED.value, reason_code or REQUESTER_CANCELLED)
+    for s in store.steps_of(request_id):
+        if s["submission_round"] == rnd and s["step_status"] == StepStatus.PENDING:
+            res.step_updates.append({"approval_step_id": s["approval_step_id"],
+                                     "step_status": StepStatus.CANCELLED.value})
+            res.approval_events.append(_event(res, s["approval_step_id"], ApprovalEventType.CANCELLED.value, None))
+    if r["workflow_status"] != S.DRAFT:
+        res.budget_postings.extend(store.release_postings(r, at, S.CANCELLED.value))
+    _record(store, res, r, None, None)
     return res
 
 
@@ -468,6 +506,8 @@ class InMemoryWorkflow:
         self.roles = roles or {}
         self.attempts: list[dict] = []
         self.idempotency_records: dict[tuple[str, str], dict] = {}
+        self.audit_events: list[dict] = []
+        self.failures: list[dict] = []            # processing_failure rows
 
     def steps_of(self, request_id: str) -> list[dict]:
         return sorted(self.steps.get(request_id, []), key=lambda s: s["sequence_no"])
@@ -488,10 +528,14 @@ class InMemoryWorkflow:
     def record_idempotency(self, row: dict) -> None:
         self.idempotency_records[(row["actor_id"], row["idempotency_key"])] = row
 
+    def record_audit(self, rows: list[dict]) -> None:
+        self.audit_events.extend(rows)
+
     def record_decision(self, res: DecisionResult) -> None:
         rid = res.request_id
-        self.attempts.append(res.attempt)
-        self.record_idempotency(res.idempotency_row)
+        if res.attempt is not None:                  # a cancellation has neither attempt nor key
+            self.attempts.append(res.attempt)
+            self.record_idempotency(res.idempotency_row)
         by_id = {s["approval_step_id"]: s for s in self.steps.get(rid, [])}
         for u in res.step_updates:
             by_id[u["approval_step_id"]].update({k: v for k, v in u.items() if k != "approval_step_id"})
@@ -503,8 +547,12 @@ class InMemoryWorkflow:
                                        "correlation_id": res.correlation_id, **e})
         self.load_request(rid).update(res.request_updates)
         self.post_decision_rows(res)
+        self.record_audit(res.audit_events)
+        if res.reimbursement is not None:
+            self.record_reimbursement(res.reimbursement)
 
-    def record_reassignment(self, request_id: str, step_update: dict, event: dict) -> None:
+    def record_reassignment(self, request_id: str, step_update: dict, event: dict, audit: dict) -> None:
         step = next(s for s in self.steps[request_id] if s["approval_step_id"] == step_update["approval_step_id"])
         step.update({k: v for k, v in step_update.items() if k != "approval_step_id"})
         self.approval_events.append(event)
+        self.record_audit([audit])

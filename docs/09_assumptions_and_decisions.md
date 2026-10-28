@@ -392,7 +392,7 @@ Original proposals:
 | AMB-P7A-03 | A delegation whose delegate is the requester: substitution moves the requester up to the delegator, who was already visited. | Level unresolved -> NO_VALID_APPROVAL_PATH (same as the oracle). Alternative: continue with the delegator's manager (needs an oracle change too). |
 | AMB-P7A-04 | Writing approval_event ASSIGNED now (Phase 7A) or with the audit work (Phase 8). | Now, for step 1 only (DEC-P7A-06). |
 
-## 12. Phase 7B additions (decisions, resubmission, process owner, S6 timing, carry-forward), awaiting approval
+## 12. Phase 7B additions (decisions, resubmission, process owner, S6 timing, carry-forward), APPROVED 2026-10-29 (commit ce59a2a; ASM-P7B-12 accepted)
 
 ### 12.1 Assumptions (ASSUMPTION, illustrative synthetic; values in config/*.yaml)
 
@@ -446,3 +446,98 @@ Original proposals:
 - Lesson: G7s are excluded from the request-requester pool in S3 / S4 (a G7 requester has no approval path; that case is only planted as S19). Promoting people to G7 therefore changes the pools and every later draw of S3 / S4, so a structural change to who is G7 can never be "master data only".
 - Cosmetic synthetic-data quirk (owner 2026-10-28, keep): EMP-000181 (GB) is head of DEPT-05 and, after the promotion, has the job title "Chief Financial Officer". Routing is unaffected: one person resolved for several levels gets one step with covered_levels (in the dataset EMP-000181 holds L1, L2, L1+L2 in one step, and L3 steps; services = oracle on every record).
 - Before / after the S19 change (seed 20261022 / 400): employees G6 24 -> 22, G7 1 -> 3; approval_step 2548 -> 2547 (APPROVED 2506 -> 2518, PENDING 42 -> 29); leave at as-of APPROVED 755 -> 756, DRAFT 8 -> 7, ESCALATED 5 -> 6, PENDING 12 -> 11 (REJECTED 12, RETURNED 8 unchanged); expense APPROVED 893 -> 902, ESCALATED 19 -> 17, PENDING 20 -> 12, RETURNED 33 -> 34 (DRAFT 8, REJECTED 27 unchanged).
+
+## 13. Phase 8 additions (reimbursement and audit), split 8A / 8B, awaiting approval
+
+Split (2026-10-29): 8A = services, tests and docs (the dataset is unchanged, fingerprint 28ece855...); 8B = the
+dataset part, made only after the owner's OK on the plan in 13.4.
+
+### 13.1 Assumptions (ASSUMPTION, illustrative synthetic)
+
+| ID | Assumption |
+|---|---|
+| ASM-P8-01 | The reimbursement created inside the final-approval transaction (docs/06 8.2 step 6) has actor SYSTEM on its CREATE attempt and audit row (the approver approved the claim; the system created the payment record). It has no idempotency record of its own: the approve action's key and the partial unique index cover it (docs/06 8.4 normal path). |
+| ASM-P8-02 | The idempotency scope of the SYSTEM actor (payment runs) is the lowest-id application_user holding SYSTEM_ADMIN (idempotency_record.actor_user_id is NOT NULL and references a user). |
+| ASM-P8-03 | At COMPLETED, ACTUAL = approved_amount is posted on the budget the reservation was posted on, and RELEASE = what that reservation still holds beyond it (reason REIMBURSEMENT_COMPLETED). Several open reservations (possible after a resubmission in another budget year) are used in budget-id order. committed_amount -= ACTUAL and actual_amount += ACTUAL, so V-ARITH-08 keeps holding. |
+| ASM-P8-04 | The schema requires a reason on every reimbursement_attempt that is not ACCEPTED (CHECK non_accepted_has_reason), so a COMPLETED attempt carries reason PAYMENT_COMPLETED; a PAYMENT_FAILED attempt carries the failure code (PAYMENT_FAILED in the simulation). Found by the DB test. |
+| ASM-P8-05 | A cancelled request gets decision_reason_code REQUESTER_CANCELLED unless a reason is given. Its pending steps become CANCELLED (approval_event CANCELLED, actor NULL); an expense claim RELEASEs its open reservation (BR-BUD-04). |
+| ASM-P8-06 | audit_event content: entity_type = table name; actor_id = employee id, or SYSTEM when the source row has actor NULL; one row per request transition (same states, reason and calculated_values as the status event), one per approval attempt on its step (blocked: previous = new state, reason = guard), one per step a decision changes (SKIPPED / CANCELLED), one per reassignment (calculated_values {from, to}), one per idempotent replay (reason IDEMPOTENT_REPLAY, states NULL), one per reimbursement creation / status change / blocked attempt, one per processing_failure (reason = error code). An accepted process-owner decision is audited by its request transition row (no second row). |
+
+### 13.2 Decisions
+
+| ID | Decision | Alternatives considered |
+|---|---|---|
+| DEC-P8-01 | src/services/reimbursement_service.py (creation at final approval, manual create, start / settle payment, cancel) over a ReimbursementStore protocol implemented by InMemoryExpenseStore (mixin InMemoryReimbursements) and SqlExpenseStore. The reimbursement state machine is data in lifecycle.REIMBURSEMENT_TRANSITIONS; anything else raises IllegalTransition. | A separate reimbursement store. |
+| DEC-P8-02 | src/services/audit_service.py builds audit rows; the services attach them to their results and the stores write them in the same transaction (in memory: appended; PostgreSQL: AUD ids from id_sequence). Idempotency helpers moved to src/services/idempotency.py (approval_service re-exports them) so the two services do not import each other. | Database triggers writing audit rows (they cannot see actor, rule or reason). |
+| DEC-P8-03 | Who may call the manual reimbursement paths (create, cancel: SYSTEM_ADMIN) is enforced by the API layer in Phase 9, like every other authentication check; the services record the actor. | A role check inside the service with a new blocked reason. |
+| DEC-P8-04 | Cancellation (approval_service.cancel_request) is not an approval action: no approval_attempt, no idempotency record (a repeat finds CANCELLED, which is terminal, so it raises IllegalTransition). Only the requester may cancel. | An idempotency operation CANCEL (needs a migration of the enum CHECK). |
+| DEC-P8-05 | A violation of uq_reimbursement_active_per_claim on insert (a race) is caught in a savepoint and recorded as a BLOCKED DUPLICATE_REIMBURSEMENT attempt in the same transaction (docs/06 8.4 step 5 says "in a new transaction"; a savepoint gives the same result without losing the caller's transaction). | A second transaction. |
+| DEC-P8-06 | repositories/base.run_recording_failure(engine, ...): runs a use case in one transaction; a technical error (SQLAlchemy operational / interface / internal errors, timeouts, connection errors, RuntimeError subclasses such as LedgerMismatch and PolicyConfigurationError) rolls it back, then a processing_failure row and its audit row are written in a second transaction with the same correlation id and the error is raised again. Business refusals pass through. Used by the API in Phase 9. | |
+| DEC-P8-07 | Audit hash chain (DEC-20, stretch): NOT done in 8A. It needs a migration (prev_hash, row_hash), a serialised insert order and a validator; proposed as the last, optional item of 8B. | |
+| DEC-P8-08 | 8A leaves the dataset unchanged: the in-memory stores now also build reimbursement and audit rows during S6, but stage S6 does not export them yet (verified: fingerprint 28ece855..., git shows no change under data/). | |
+
+### 13.3 Ambiguities found in Phase 8A (default APPLIED unless stated; please confirm or change)
+
+| ID | Ambiguity | Default |
+|---|---|---|
+| AMB-P8-01 | BR-RMB-01 requires approved_amount > 0, but docs/06 lists no reason code for a zero amount. | Reason ZERO_APPROVED_AMOUNT (checked after CLAIM_NOT_APPROVED). Applied. |
+| AMB-P8-02 | Cancelling a reimbursement (ELIGIBLE / FAILED -> CANCELLED): the budget effect is not defined. | No posting: the claim stays APPROVED and its reservation stays committed until a new reimbursement completes or an admin corrects it. Applied. |
+| AMB-P8-03 | docs/06 7.2 also audits every ledger posting and master-data change. | Not in 8A: ledger rows already carry correlation ids and are append-only; master-data changes arrive with the API (Phase 9). Proposed: ledger-posting audit rows in 8B only if the owner wants them (adds about 18,000 rows). |
+| AMB-P8-04 | docs/06 8.1 step 1 says submit writes an idempotency_record, but no store writes one for a first submission (only for a resubmission). S18 (repeated submission) needs it. | Not changed in 8A. Proposed for 8B: SUBMIT idempotency rows on every submission (about +1,785 rows) so that S18 can be planted; or leave S18 for Phase 9 (API). Owner to choose. |
+| AMB-P8-05 | A processing_failure is OPEN; whether a successful retry sets it to RESOLVED. | Not changed (rows stay OPEN; resolution is an admin action). Applied; please confirm. |
+
+### 13.4 Phase 8B dataset plan (NOT applied; waiting for the owner's OK)
+
+Baseline today (commit ce59a2a, seed 20261022): volumes 400 employees / 6 leave policies / 800 leave requests /
+1,000 expense claims; fingerprint 28ece8554f97a48e6323ef032ff926919596a80ff5f2b5da3ebe2fc9edf42dfa. At as-of:
+leave APPROVED 756, PENDING_APPROVAL 11, ESCALATED 6, REJECTED 12, RETURNED 8, DRAFT 7; expense APPROVED 902,
+PENDING_APPROVAL 12, ESCALATED 17, REJECTED 27, RETURNED 34, DRAFT 8. Every RETURNED request is a planted record:
+S23 8 (leave), S05 10, S26 8, S06a 8, S10 8 (expense). Row counts: approval_step 2547, approval_event 5060,
+approval_attempt 2563, request_status_event 6962, request_exception 130, idempotency_record 2563,
+cost_center_transaction 1041, expense_line 3224, receipt 2941, leave_balance_transaction 15512; reimbursement,
+reimbursement_attempt, audit_event, processing_failure 0. Ground truth 1800 / 1055 / 40 / 41.
+
+What changes (stage S6 continued, in time order, through the services):
+1. S7 reimbursements: the row at final approval for every claim APPROVED at as-of (~902). Payment run on the
+   `payments` stream (reserved in the stream list and unused so far, so no other draw moves): PROCESSING and
+   COMPLETED at 17:00 on the 1..5th business day after approval (ASM-035); 5% of first attempts fail (keyed draw)
+   -> FAILED + processing_failure (S25), retry 2 business days later, succeeds. Nothing after as-of.
+2. S13 (8): a second, manual CREATE on 8 reimbursed claims -> BLOCKED DUPLICATE_REIMBURSEMENT.
+3. S11 (8) / S12 (8): BLOCKED attempts on pending steps of otherwise normal routed requests (4 leave + 4 expense
+   each), one hour after assignment: by the requester (SELF_APPROVAL) and by an employee outside the chain
+   (UNAUTHORIZED_APPROVER, the lowest-id active employee of another department). The request is not changed.
+4. Resubmissions (ASM-025): each RETURNED request is resubmitted with the issue fixed when a keyed draw on a new
+   stream `resubmissions` (appended) is < 0.5, after 1..10 business days: receipt added (S05), currency fixed (S26),
+   duplicate line removed (S06a), cost center set (S10), certificate flagged (S23). Expected ~21 of 42.
+5. Cancellations (ASM-040): each submitted request that is neither planted nor a boundary record gets a keyed draw
+   on a new stream `cancellations` (appended); with probability 0.02 the requester cancels at 12:00 UTC on the next
+   business day after submission if it is still PENDING_APPROVAL or RETURNED (before any 17:00 decision).
+   Expected ~16 leave and ~20 expense.
+6. S8 audit_event for every operation above and every existing one (submissions, decisions, reassignment).
+7. Ground truth: expected_final_status / approved amount / reimbursement eligibility at as-of follow the new
+   outcomes; S11 / S12 / S13 / S25 get labels and actual counts; labels of resubmitted records stay on round 1
+   (detected at round 1); new expected field: reimbursement status at as-of. The oracle gets its own payment,
+   resubmission and cancellation model (no src/services import) and must agree on every record.
+8. V-ARITH-04 and V-WF-03 then run on real reimbursement rows (today NOT APPLICABLE).
+
+What stays: volumes 400 / 6 / 800 / 1,000 (no new requests; resubmission keeps ids); all master data, policies,
+users, rules, holidays, fx; every raw input of S3 / S4 / S5 (new draws come from `payments` and two appended
+streams only); every planted count of Groups A and B and every boundary count (S05, S06a, S10, S23, S26 keep their
+records and labels; their final status may change).
+
+Expected counts (estimates; the real numbers will be reported): reimbursement ~900; reimbursement_attempt ~2,800
+(CREATE, PROCESS, COMPLETED per paid claim, +3 per failure, +8 S13); processing_failure ~45 (= S25);
+audit_event ~13,000; cost_center_transaction 1041 -> ~1,970 (ACTUAL per paid claim, RELEASE for the 8 capped S07a
+claims, resubmission and cancellation postings); approval_attempt +16; idempotency_record +~1,820 (PROCESS_PAYMENT
+per run, RESUBMIT, S13); request_status_event +~100; expense_line and receipt + a few (corrected rounds).
+Status at as-of: CANCELLED ~16 leave / ~20 expense (mostly taken from APPROVED), RETURNED 8 -> ~4 and 34 -> ~17.
+Natural counts that may move: S04 / S14 (only if a cancelled request is one of them), natural BUDGET_EXCEEDED (1),
+because ACTUAL + RELEASE and cancellations change the available budget seen by later claims.
+
+Fingerprint effect: changes. New files: reimbursement, reimbursement_attempt, processing_failure, audit_event
+(csv + json each). Changed: expense_claim, expense_line, receipt, leave_request, leave_balance(_transaction),
+cost_center_transaction, cost_center_budget, approval_*, request_*, idempotency_record, ground truth, seed.sql,
+validation report; detections.csv only if a cancelled claim was part of a detection. Unchanged: every master,
+policy, user, rule and calendar file.
+Questions for the owner: (a) the plan as a whole; (b) cancellation selection and timing (item 5); (c) S18 / SUBMIT
+idempotency rows (AMB-P8-04); (d) ledger-posting audit rows (AMB-P8-03); (e) hash chain at the end of 8B (DEC-P8-07).
