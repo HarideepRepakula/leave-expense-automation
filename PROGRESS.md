@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 6 (Expense validation and expense claim services)
-Status: COMPLETE AND VERIFIED 2026-10-28. Waiting for "APPROVED PHASE 6". Do not start Phase 7 before that.
+Current phase: Phase 7A (routing and approval steps; Phase 7 split into 7A and 7B, owner 2026-10-28)
+Status: NOT STARTED. Begin in a new conversation with the owner's 7A prompt. Stop for "APPROVED PHASE 7A".
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -19,6 +19,22 @@ Phase 4: APPROVED 2026-10-28. Owner re-ran validation, the reproducibility check
     (or were only partly generated). Scheduled as the first task of Phase 5.
 
 Phase 5: APPROVED 2026-10-28. AMB-P5-01..04 accepted as applied. The OneDrive copy is already deleted (item closed).
+Phase 6: APPROVED 2026-10-28 (commit c4f1590). AMB-P6-01..05 accepted. Owner instruction for Phase 7A: change the
+  oracle so an escalated expense claim keeps its budget reservation until the final decision (reservation kept
+  unless validation rejects or returns the claim), matching the services and BR-BUD-03/04; re-run both comparisons.
+Phase 7 plan (owner 2026-10-28):
+  7A = oracle budget change; routing service src/services/approval_routing.py (bands lower-exclusive/upper-inclusive,
+       priority, RULE_CONFLICT, NO_VALID_APPROVAL_PATH); approvers L1-L5 with substitution, delegation and
+       covered_levels; migration 0002 approval_step.covered_levels (JSONB NOT NULL) + model + docs/10 + up/down test;
+       steps at submission for PENDING_APPROVAL (memory and both DB stores); comparisons extended to the route
+       (target 0 ROUTING_PHASE7, 0 DISAGREE); dataset unchanged (verify file by file).
+  7B = decisions (approve/reject/return) with attempts, idempotency and history; resubmission; process-owner
+       decisions; S6 timing into the dataset; year-end CARRY_FORWARD rows replacing AMB-P5-02; S19 and S22 data.
+  S19 (owner decision): option (a) one G7 per country, each the ONLY G7 in its country; L5 = the G7 of the
+       requester's country, so a G7 requester still has no valid path and S19 plants come from several people.
+       Dataset change decided in 7B and shown to the owner BEFORE it is made; not touched in 7A.
+  S22 timing (proposed for 7B): decisions at 17:00 UTC on a business day at least one business day after
+       assignment, so an S22 partner submitted at most 24 h earlier is never decided first (closes AMB-P4-04).
 
 ## Phase 6 record
 

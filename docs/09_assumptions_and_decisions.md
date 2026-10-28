@@ -327,7 +327,7 @@ Original proposals:
 | AMB-P5-03 | AM-A4 says the negative-balance detector looks at "the ledger". In Phase 5 the only USAGE rows are legacy approvals; earlier requests still pending are not in the ledger yet. A ledger-only detector would miss S01 records whose balance was already reserved by earlier pending requests (the oracle and the S01 construction count them). | Count open reservations (ASM-P5-05). Alternative: posted ledger only (would disagree with the oracle on S01). |
 | AMB-P5-04 | docs/05 9.3 gives decision_reason_code only for REJECTED. | Also set for RETURNED_FOR_CORRECTION and ESCALATED_FOR_REVIEW (ASM-P5-08). |
 
-## 10. Phase 6 additions (expense validation and expense claim services), awaiting "APPROVED PHASE 6"
+## 10. Phase 6 additions (expense validation and expense claim services), APPROVED 2026-10-28 (AMB-P6-01..05 accepted; AMB-P6-01: the oracle is aligned in Phase 7A)
 
 ### 10.1 Assumptions (ASSUMPTION, illustrative synthetic; values in config/*.yaml)
 
