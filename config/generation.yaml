@@ -146,6 +146,13 @@ anomalies:
     s03_excess_days: [1, 4]
     s14l5_usd: ["5100.00", "5800.00"]           # within the 6,000 USD per-claim limit
     s22_max_gap_hours: 24                       # partner request submitted at most this long before
+# Stage S6 (Phase 7B): simulated decisions (docs/05 9.5). Delays in business days of the deciding person's
+# country, drawn per (request, round, level) from the delays stream (ASM-024); decided at decision_hour_utc on the
+# max(1, delay)-th business day after the assignment day, counting from the next day when assigned at or after
+# that hour (S22 rule, ASM-P7B-02).
+decisions:
+  decision_hour_utc: 17
+  delay_business_days: {L1: [0, 5], L2: [1, 7], L3: [1, 7], L4: [2, 10], L5: [3, 15], PROCESS_OWNER: [3, 20]}
 boundaries:
   per_case: 3                                   # BC-01..BC-09 each sub-case (docs/02 section 6)
   bc10_groups: 2

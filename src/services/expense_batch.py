@@ -7,9 +7,11 @@ Batch detectors over every submitted claim (drafts are invisible):
   class SUSPICIOUS_PATTERN as "suspected split claim, requires investigation" (AM-H3).
 
 replay_expense() submits every non-draft claim as a DRAFT at its created_at instant through submit_expense(), in
-submission order, on an in-memory store (ASM-P6-01). The dataset itself is not changed (AMB-P3-01). With a router
-(Phase 7A) every submission is also routed; routing codes are part of codes() but not of submission_detections()
-(DEC-P7A-04).
+time order, on an in-memory store (ASM-P6-01), whatever outcome a previous S6 run wrote on it (raw-input view,
+DEC-P7B-02). The budget ledger starts empty: every cost_center_transaction row is posted by the replay itself
+(stage S6 is the only source of them). With a router (Phase 7A) every submission is also routed; with a
+DecisionTiming (Phase 7B) the simulated decisions run too (workflow_simulation). Routing codes are part of codes()
+but not of submission_detections() (DEC-P7A-04).
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ from src.services.exception_service import ExceptionCatalogue
 from src.services.expense_service import DetectionParams, InMemoryExpenseStore, claim_hashes, current_lines, \
     split_groups, submit_expense
 from src.services.leave_detectors import Detection
+from src.services.workflow_simulation import SUBMIT, DecisionDriver, DecisionTiming, EventQueue
 
 REPLAY_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "urn:lea:expense-replay")
 
@@ -64,6 +67,7 @@ def split_claims(store: InMemoryExpenseStore, params: DetectionParams) -> list[D
 class ExpenseReplay:
     store: InMemoryExpenseStore
     detections: list[Detection]
+    driver: DecisionDriver | None = None
 
     def codes(self, claim_id: str) -> set[str]:
         res = self.store.results.get(claim_id)
@@ -76,21 +80,31 @@ class ExpenseReplay:
 
 
 def replay_expense(tables: dict[str, list[dict]], catalogue: ExceptionCatalogue, params: DetectionParams,
-                   claims: list[dict] | None = None, router: ApprovalRouter | None = None) -> ExpenseReplay:
+                   claims: list[dict] | None = None, router: ApprovalRouter | None = None,
+                   timing: DecisionTiming | None = None, roles: dict[str, set[str]] | None = None) -> ExpenseReplay:
     """`tables`: the ops tables (employee, expense_policy, fx_rate, cost_center, cost_center_budget, receipt,
-    cost_center_transaction, expense_line); `claims` defaults to tables["expense_claim"]; `router`: route every
-    submission (Phase 7A), None keeps the Phase 6 behaviour."""
+    expense_line); `claims` defaults to tables["expense_claim"]; `router`: route every submission (Phase 7A);
+    `timing`: run the simulated decisions up to timing.as_of (Phase 7B, needs a router and `roles`)."""
     store = InMemoryExpenseStore({e["employee_id"]: e for e in tables["employee"]}, tables["expense_policy"],
                                  tables["fx_rate"], tables["cost_center"], tables["cost_center_budget"],
-                                 tables["receipt"], tables.get("cost_center_transaction", []), params, router)
+                                 tables["receipt"], [], params, router, roles)
     lines: dict[str, list[dict]] = {}
     for ln in tables["expense_line"]:
-        lines.setdefault(ln["expense_claim_id"], []).append(ln)
-    for c in sorted((c for c in (claims if claims is not None else tables["expense_claim"])
-                     if c["workflow_status"] != WorkflowStatus.DRAFT.value),
-                    key=lambda c: (c["created_at"], c["expense_claim_id"])):
+        if ln["submission_round"] == 1:          # the dataset's raw lines (no resubmission in S6, ASM-P7B-06)
+            lines.setdefault(ln["expense_claim_id"], []).append(ln)
+    queue = EventQueue()
+    driver = DecisionDriver(store, catalogue, timing, queue)
+
+    def submit(c: dict, at) -> None:
         cid = c["expense_claim_id"]
-        store.add_claim(c, lines.get(cid, []), WorkflowStatus.DRAFT.value)
-        submit_expense(store, cid, catalogue, c["created_at"], c["employee_id"], uuid.uuid5(REPLAY_NAMESPACE, cid))
+        store.add_claim({**c, "current_round": 1, "decision_reason_code": None, "approved_amount": None},
+                        lines.get(cid, []), WorkflowStatus.DRAFT.value)
+        submit_expense(store, cid, catalogue, at, c["employee_id"], uuid.uuid5(REPLAY_NAMESPACE, cid))
+        driver.after(cid)
+
+    for c in (claims if claims is not None else tables["expense_claim"]):
+        if c["workflow_status"] != WorkflowStatus.DRAFT.value:
+            queue.push(c["created_at"], SUBMIT, c["expense_claim_id"], lambda at, c=c: submit(c, at))
+    queue.run()
     detections = duplicate_receipts(store) + split_claims(store, params)
-    return ExpenseReplay(store, sorted(detections, key=lambda d: (d.record_id, d.exception_code)))
+    return ExpenseReplay(store, sorted(detections, key=lambda d: (d.record_id, d.exception_code)), driver)

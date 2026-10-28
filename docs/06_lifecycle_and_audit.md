@@ -189,6 +189,8 @@ Transaction:
 6. If ACCEPTED: update step (status, decision_at, reason, comment); insert approval_event; if APPROVE and more steps: set next step assigned_at, ASSIGNED event; if APPROVE and last step: request -> APPROVED, leave USAGE posting with leave_balance locked, or expense reimbursement row ELIGIBLE plus reimbursement_attempt CREATE ACCEPTED; if REJECT: request -> REJECTED, remaining steps SKIPPED, RELEASE posted; if RETURN: request -> RETURNED_FOR_CORRECTION, pending steps CANCELLED, RELEASE posted.
 7. request_status_event and audit_event rows; idempotency COMPLETED; commit.
 
+Phase 7B notes: a returning step becomes CANCELLED with an approval_event RETURNED (decision_at stays NULL, ASM-P7B-03). A blocked attempt completes its key; a retry needs a new client key (DEC-P7B-08). audit_event rows and the reimbursement of step 6 arrive in Phase 8.
+
 ### 8.3 Resubmit
 
 Idempotency key: client header, else derived = SHA-256(actor_id | request_id | (current_round + 1)). Scope: (actor_id, key).

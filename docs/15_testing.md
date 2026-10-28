@@ -58,3 +58,10 @@ pytest -q --tb=short -ra  # short tracebacks and a summary of skips/failures
 ## Reporting rule
 
 Real output only. PROGRESS.md and the end-of-phase report quote the actual pytest summary line; a run that was not executed is reported as NOT RUN with the reason.
+
+## Phase 7B tests
+
+- tests/unit/test_approval_decisions.py: every guard, higher-level authority, idempotent replay and conflict, reject / return effects, resubmission (round 2, ids and history kept, maximum rounds), expense approved amount, RELEASE and resubmitted lines, process-owner send-on / reject, L4 budget override, the decision-time rule (more than 24 hours after assignment).
+- tests/unit/test_leave_balance.py: year-end CARRY_FORWARD rows replace the recompute.
+- tests/db/test_approval_decisions_db.py: the same decisions, process-owner decisions and resubmission through the PostgreSQL stores (attempt and idempotency rows, committed_amount, lines of round 2, LBT ids per year).
+- tests/data/test_outcomes_on_dataset.py: S6 on the generated dataset at both scales (timing, S22 partners, status at as-of = ground truth, carry-forward rows, approved amounts, legacy markers).

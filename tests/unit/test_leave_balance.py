@@ -61,41 +61,54 @@ def test_available_counts_accrual_scheduled_up_to_the_part_start():
     assert book(E1, ANNUAL_IN).available(2025, date(2025, 3, 10), part_start=date(2025, 5, 5)) == D("11.5")
 
 
+def with_year_end(emp: str, pol: str, extra: list[dict] = (), reservations: list[Reservation] = ()) \
+        -> tuple[BalanceBook, list[dict]]:
+    """The book after the 2026 year-end postings (Phase 7B: carry-forward exists only as these rows)."""
+    rows = book(emp, pol, extra, reservations=reservations).year_end_postings(2026)
+    return book(emp, pol, list(extra) + rows, reservations=reservations), rows
+
+
 def test_next_year_part_at_submission_counts_only_its_scheduled_accrual():
-    """Submitted 10 Dec 2025 for January 2026: carry-forward unknown (not counted), Jan 1 accrual counted."""
-    b = book(E1, ANNUAL_IN)
-    assert b.carry_in(2026, date(2025, 12, 10)) == 0
+    """Submitted 10 Dec 2025 for January 2026: carry-forward unknown (the Jan 1 rows are dated after the
+    submission date, BR-LBAL-09), Jan 1 accrual counted."""
+    b, _ = with_year_end(E1, ANNUAL_IN)
     assert b.available(2026, date(2025, 12, 10), part_start=date(2026, 1, 1)) == D("1.5")
     assert b.available(2026, date(2025, 12, 10), part_start=date(2026, 2, 2)) == D("3.0")
 
 
-def test_carry_forward_is_recomputed_after_january_first():
-    """BR-LV-13: no CARRY_FORWARD row posted yet, so it is recomputed: min(4 + 18 - 0, cap 10) = 10."""
-    b = book(E1, ANNUAL_IN)
-    assert b.carry_in(2026, date(2026, 2, 2)) == D("10.0")
-    assert b.available(2026, date(2026, 2, 2)) == D("13.0")
+def test_without_year_end_rows_nothing_is_carried():
+    """AMB-P5-02 replaced: carry-forward is never recomputed; before the rows exist nothing is carried."""
+    assert book(E1, ANNUAL_IN).available(2026, date(2026, 2, 2)) == D("3.0")
 
 
-def test_posted_carry_forward_row_is_used_instead_of_recomputing():
-    b = book(E1, ANNUAL_IN, extra=[txn(lbal(E1, ANNUAL_IN, 2026), "CARRY_FORWARD", D("6.0"), date(2026, 1, 1))])
-    assert b.carry_in(2026, date(2026, 2, 2)) == 0
-    assert b.available(2026, date(2026, 2, 2)) == D("9.0")
+def test_year_end_rows_carry_up_to_the_cap_and_expire_the_rest():
+    """BR-LBAL-04: 4 + 18 - 0 = 22 at Dec 31 -> CARRY_FORWARD 22, EXPIRY -12 (cap 10), both dated Jan 1."""
+    b, rows = with_year_end(E1, ANNUAL_IN)
+    assert [(t["txn_type"], t["quantity"], t["txn_date"], t["leave_balance_id"]) for t in rows] == [
+        ("CARRY_FORWARD", D("22.0"), date(2026, 1, 1), lbal(E1, ANNUAL_IN, 2026)),
+        ("CARRY_FORWARD_EXPIRY", D("-12.0"), date(2026, 1, 1), lbal(E1, ANNUAL_IN, 2026))]
+    assert b.available(2026, date(2026, 2, 2)) == D("13.0")       # 10 carried + 2 x 1.5
 
 
-def test_carry_forward_follows_prior_year_usage_and_open_reservations():
+def test_year_end_rows_follow_prior_year_usage_and_open_reservations():
     used = txn(lbal(E1, ANNUAL_IN, 2025), "USAGE", D("-15.0"), date(2025, 6, 2), "LVE-2025-000001")
-    assert book(E1, ANNUAL_IN, extra=[used]).available(2026, date(2026, 2, 2)) == D("10.0")   # 7 carried + 3
+    b, rows = with_year_end(E1, ANNUAL_IN, extra=[used])
+    assert [t["txn_type"] for t in rows] == ["CARRY_FORWARD"]      # 7 is under the cap: nothing expires
+    assert b.available(2026, date(2026, 2, 2)) == D("10.0")       # 7 carried + 3
     pending = [Reservation("LVE-2025-000002", 2025, D("16.0"), T0)]
-    assert book(E1, ANNUAL_IN, reservations=pending).carry_in(2026, date(2026, 2, 2)) == D("6.0")   # ASM-P5-03
+    b, rows = with_year_end(E1, ANNUAL_IN, reservations=pending)  # open at year end: as if approved (ASM-P7B-05)
+    assert sum(t["quantity"] for t in rows) == D("6.0")
 
 
-@pytest.mark.parametrize("emp,pol,usage,expected", [
-    (E2, ANNUAL_US, "-16.0", "-1.0"),   # 2 + 12 - 16 = -2 carried as debt, + Jan accrual 1.0
-    (E1, ANNUAL_IN, "-25.0", "1.5"),    # 4 + 18 - 25 = -3 does not carry, + Jan accrual 1.5
+@pytest.mark.parametrize("emp,pol,usage,expected,rows", [
+    (E2, ANNUAL_US, "-16.0", "-1.0", 1),   # 2 + 12 - 16 = -2 carried as debt, + Jan accrual 1.0
+    (E1, ANNUAL_IN, "-25.0", "1.5", 0),    # 4 + 18 - 25 = -3 does not carry (no row), + Jan accrual 1.5
 ])
-def test_negative_carry_forward(emp, pol, usage, expected):
+def test_negative_carry_forward(emp, pol, usage, expected, rows):
     used = txn(lbal(emp, pol, 2025), "USAGE", D(usage), date(2025, 6, 2), "LVE-2025-000001")
-    assert book(emp, pol, extra=[used]).available(2026, date(2026, 1, 5)) == D(expected)
+    b, posted = with_year_end(emp, pol, extra=[used])
+    assert len(posted) == rows
+    assert b.available(2026, date(2026, 1, 5)) == D(expected)
 
 
 def test_reservations_reduce_availability_except_the_request_itself():

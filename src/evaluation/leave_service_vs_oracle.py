@@ -8,7 +8,9 @@ other; only this evaluation module reads both. For every leave request it compar
   with the severities read straight from config/exception_codes.yaml;
 - requested quantity and the per-year split (BR-LBAL-09);
 - the approval rule and the route (Phase 7A): level, approver, covered levels and delegated_from of every step;
-  when the services end in PENDING_APPROVAL their approval steps must be exactly that route, otherwise no steps.
+  when the services end in PENDING_APPROVAL their approval steps must be exactly that route, otherwise no steps;
+- the status at the as-of instant (Phase 7B): the services' S6 simulation (decisions with timing) against the
+  oracle's independent timing model, and the status written in the dataset against the services' simulation.
 
 Routing codes (NO_VALID_APPROVAL_PATH, RULE_CONFLICT) are compared like every other code since Phase 7A, so the
 Phase 5/6 result ROUTING_PHASE7 can no longer occur; it is still printed (always 0) so the report shows it.
@@ -24,20 +26,26 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
+import json
+from datetime import date
+
 import yaml
 
+from src.common.rng import RngStreams
+from src.data.config_loader import load_config
+from src.data.stages.outcomes import simulate
 from src.reference.oracle import Expectation, Oracle
 from src.services.approval_routing import ApprovalRouter, Routing
 from src.services.calendar_service import HolidayCalendar
-from src.services.exception_service import ExceptionCatalogue
-from src.services.leave_batch import LeaveReplay, replay_leave
+from src.services.expense_batch import ExpenseReplay
+from src.services.leave_batch import LeaveReplay
 
 ROOT = Path(__file__).resolve().parents[2]
 RESULTS = ("AGREE", "ROUTING_PHASE7", "DISAGREE")
 STATUS_BY_SEVERITY = {"HARD": "REJECTED", "CORRECTABLE": "RETURNED_FOR_CORRECTION", "SOFT": "ESCALATED_FOR_REVIEW"}
 COLUMNS = ["record_id", "employee_id", "kind", "expected_codes", "actual_codes", "expected_status", "actual_status",
-           "oracle_final_status", "expected_quantity", "actual_quantity", "expected_parts", "actual_parts",
-           "expected_route", "actual_route", "steps", "result"]
+           "oracle_final_status", "actual_status_asof", "dataset_status", "expected_quantity", "actual_quantity",
+           "expected_parts", "actual_parts", "expected_route", "actual_route", "steps", "result"]
 
 
 @dataclass
@@ -93,24 +101,43 @@ def steps_match(res, status: str) -> tuple[bool, str]:
     return ok, str(len(steps))
 
 
+def run_simulation(tables: dict[str, list[dict]], config_dir: Path, seed: int | None = None,
+                   as_of: date | None = None) -> tuple[LeaveReplay, ExpenseReplay, int, date]:
+    """The services' S6 run (routing, simulated decisions with timing, year-end rows) on the raw-input view of
+    `tables`; seed and as-of default to config/generation.yaml (the generator's own values are in the manifest)."""
+    cfg = load_config(config_dir)
+    seed = cfg["generation"]["master_seed"] if seed is None else seed
+    as_of = cfg["generation"]["as_of_date"] if as_of is None else as_of
+    streams = RngStreams(seed, cfg["generation"]["streams"])
+    calendar = HolidayCalendar.from_rows(cfg["calendar"]["weekend_days"], tables["country_holiday"])
+    leave, expense = simulate(cfg, tables, calendar, lambda k, lo, hi: streams.keyed_integers("delays", k, lo, hi),
+                              as_of)
+    return leave, expense, seed, as_of
+
+
+def manifest_run(raw: Path) -> tuple[int | None, date | None]:
+    """(seed, as-of date) recorded by the generator next to the raw folder, else (None, None)."""
+    path = raw.parent / "manifest.json"
+    if not path.is_file():
+        return None, None
+    m = json.loads(path.read_text(encoding="utf-8"))
+    return m.get("seed"), date.fromisoformat(m["as_of_date"]) if m.get("as_of_date") else None
+
+
 def router_from(tables: dict[str, list[dict]]) -> ApprovalRouter:
     return ApprovalRouter.from_rows(tables["approval_rule"], tables["employee"], tables["department"],
                                     tables.get("delegation", []))
 
 
-def compare(tables: dict[str, list[dict]], config_dir: Path) -> Comparison:
+def compare(tables: dict[str, list[dict]], config_dir: Path, seed: int | None = None,
+            as_of: date | None = None) -> Comparison:
     codes_cfg = yaml.safe_load((config_dir / "exception_codes.yaml").read_text(encoding="utf-8"))
     severity = {c["code"]: c["severity"] for c in codes_cfg["codes"]}
-    weekend = yaml.safe_load((config_dir / "calendar.yaml").read_text(encoding="utf-8"))["weekend_days"]
 
-    oracle = Oracle(tables, config_dir)
+    replay, _, seed, as_of = run_simulation(tables, config_dir, seed, as_of)
+    oracle = Oracle(tables, config_dir, seed=seed, as_of=as_of)
     expected = oracle.leave()
     employees = {e["employee_id"]: e for e in tables["employee"]}
-    policies = {p["leave_policy_id"]: p for p in tables["leave_policy"]}
-    replay = replay_leave(tables["leave_request"], employees, policies,
-                          HolidayCalendar.from_rows(weekend, tables["country_holiday"]),
-                          tables["leave_balance_transaction"], tables["leave_balance"],
-                          ExceptionCatalogue.from_config(codes_cfg), router=router_from(tables))
 
     rows = []
     for r in sorted(tables["leave_request"], key=lambda r: r["leave_request_id"]):
@@ -134,12 +161,15 @@ def compare(tables: dict[str, list[dict]], config_dir: Path) -> Comparison:
         act_qty = res.validation.quantity if res else exp_qty
         exp_route, act_route = expected_route(x), actual_route(res.routing if res else None)
         steps_ok, steps = steps_match(res, act_status)
+        asof = replay.store.requests[rid]["workflow_status"] if rid in replay.store.requests else "DRAFT"
         same = (exp_codes == act_codes and exp_status == act_status and exp_qty == act_qty
-                and exp_parts == act_parts and exp_route == act_route and steps_ok)
+                and exp_parts == act_parts and exp_route == act_route and steps_ok
+                and x.final_status == asof == r["workflow_status"])
         rows.append({
             "record_id": rid, "employee_id": r["employee_id"], "kind": kind,
             "expected_codes": "|".join(sorted(exp_codes)), "actual_codes": "|".join(sorted(act_codes)),
             "expected_status": exp_status, "actual_status": act_status, "oracle_final_status": x.final_status,
+            "actual_status_asof": asof, "dataset_status": r["workflow_status"],
             "expected_quantity": str(exp_qty), "actual_quantity": str(act_qty),
             "expected_parts": _parts(exp_parts), "actual_parts": _parts(act_parts), "expected_route": exp_route,
             "actual_route": act_route, "steps": steps, "result": "AGREE" if same else "DISAGREE",
@@ -170,9 +200,12 @@ def print_summary(rows: list[dict]) -> None:
     summary = Counter(r["result"] for r in rows)
     for result in RESULTS:
         print(f"  {result:<15}{summary.get(result, 0):>5}")
-    print(f"  routed {sum(bool(r['expected_route']) for r in rows)}; approval steps created "
+    print(f"  routed {sum(bool(r['expected_route']) for r in rows)}; approval steps created at submission "
           f"{sum(int(r['steps'] or 0) for r in rows)} on "
-          f"{sum(r['actual_status'] == 'PENDING_APPROVAL' for r in rows)} requests in PENDING_APPROVAL")
+          f"{sum(r['actual_status'] == 'PENDING_APPROVAL' for r in rows)} requests routed to PENDING_APPROVAL")
+    at = Counter(r["actual_status_asof"] for r in rows)
+    print("  status at as-of (services = oracle = dataset on every AGREE row): "
+          + ", ".join(f"{k} {v}" for k, v in sorted(at.items())))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -184,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config-dir", type=Path, default=ROOT / "config")
     args = parser.parse_args(argv)
     tables = read_raw(args.raw)
-    comp = compare(tables, args.config_dir)
+    comp = compare(tables, args.config_dir, *manifest_run(args.raw))
     path = args.out / "leave_service_vs_oracle.csv"
     write_csv(comp.rows, path)
     kinds = Counter(r["kind"] for r in comp.rows)
@@ -193,7 +226,8 @@ def main(argv: list[str] | None = None) -> int:
     for r in comp.disagreements:
         print(f"  {r['result']} {r['record_id']} {r['kind']}: codes expected [{r['expected_codes']}] actual "
               f"[{r['actual_codes']}]; status after validation expected {r['expected_status']} actual "
-              f"{r['actual_status']} (oracle final {r['oracle_final_status']}); quantity {r['expected_quantity']}/"
+              f"{r['actual_status']}; at as-of oracle {r['oracle_final_status']} services "
+              f"{r['actual_status_asof']} dataset {r['dataset_status']}; quantity {r['expected_quantity']}/"
               f"{r['actual_quantity']}; parts {r['expected_parts']} / {r['actual_parts']}; route "
               f"[{r['expected_route']}] / [{r['actual_route']}]; steps {r['steps']}")
     c, n, cs, ns = cross_year(tables)

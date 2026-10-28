@@ -8,8 +8,9 @@ Add --load to replace the contents of lea_dev (DATABASE_URL in .env) with the ge
 truth.
 
 Stages (docs/07 section 2): S1 master, S2 balances, S3 leave, S4 expenses (valid baseline, Phase 3); S5 anomalies
-and boundaries, S9 ground truth from the planted definitions and the independent oracle, then export and
-validation (Phase 4). S6-S8 (outcomes, reimbursements, audit) arrive with the Phase 5-8 services.
+and boundaries, S9 ground truth from the planted definitions and the independent oracle (Phase 4); S6 workflow
+outcomes with decision timing and year-end carry-forward (Phase 7B); then export and validation. S7-S8
+(reimbursements, audit) arrive with Phase 8.
 """
 from __future__ import annotations
 
@@ -32,12 +33,9 @@ from src.data.stages.expenses import build_expense_claims
 from src.data.stages.ground_truth import GroundTruth, build_ground_truth, write_ground_truth
 from src.data.stages.leave import build_leave_requests
 from src.data.stages.master import build_master
+from src.data.stages.outcomes import WORKFLOW_TABLES, build_outcomes
 from src.data.stages.workbench import Workbench
 from src.services.calendar_service import HolidayCalendar
-from src.services.exception_service import ExceptionCatalogue
-from src.services.expense_batch import replay_expense
-from src.services.expense_service import DetectionParams
-from src.services.leave_batch import replay_leave
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = ROOT / "config"
@@ -51,7 +49,7 @@ class Generation:
     meta: dict
     truth: GroundTruth | None
     config_dir: Path
-    detections: list = field(default_factory=list)   # service findings (Phases 5-6), see service_detections()
+    detections: list = field(default_factory=list)   # service findings from the S6 replays (detections.csv)
 
 
 def build(seed: int | None = None, employees: int | None = None, leave_requests: int | None = None,
@@ -96,14 +94,20 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         truth = build_ground_truth(cfg, p, dataset, wb.plants, wb.boundaries, leave_map, claim_map,  # S9
                                    config_dir, FIXTURES_DIR)
         stages += ["S5 anomalies + boundaries (in place)", "S9 ground truth (planted definitions + reference oracle)"]
-        detections = service_detections(cfg, dataset, calendar)
-        stages.append("leave and expense services replay -> validation/detections.csv (Phases 5-6)")
+        leave, expense = build_outcomes(cfg, p, streams, dataset, calendar)                        # S6
+        detections = sorted(leave.submission_detections() + leave.detections + expense.submission_detections()
+                            + expense.detections, key=lambda d: (d.record_type, d.record_id, d.exception_code,
+                                                                  d.detected_by))
+        stages.append("S6 workflow outcomes (services replay with simulated decisions, as-of cut-off, "
+                      "year-end carry-forward) -> outcome tables and validation/detections.csv (Phase 7B)")
 
+    for name in WORKFLOW_TABLES + ("cost_center_transaction",):
+        dataset.setdefault(name, [])          # the Phase 3 baseline has no workflow outcomes (S6 builds them)
     missing = [t for t in TABLE_ORDER if t not in dataset]
     if missing:
         raise RuntimeError(f"stages did not produce: {missing}")
     meta = {
-        "phase": 3 if baseline_only else 6,
+        "phase": 3 if baseline_only else 7,
         "stages": stages,
         "seed": p.seed,
         "parameters": {"employees": p.employees, "leave_requests": p.leave_requests,
@@ -115,19 +119,6 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         meta["ground_truth_counts"] = {name: len(rows) for name, rows in truth.tables.items()}
         meta["scenarios_not_reached"] = scenario_shortfalls(truth.tables["scenario"])
     return Generation(dataset, credentials, meta, truth, config_dir, detections)
-
-
-def service_detections(cfg: dict, dataset: Dataset, calendar: HolidayCalendar) -> list:
-    """System detections (docs/08: request_exception codes plus batch detectors). Until the Phase 7 engine runs
-    S6, the codes come from replaying every submitted request through the leave (Phase 5) and expense (Phase 6)
-    services in submission order; the dataset itself is not changed (AMB-P3-01)."""
-    catalogue = ExceptionCatalogue.from_config(cfg["exception_codes"])
-    leave = replay_leave(dataset["leave_request"], {e["employee_id"]: e for e in dataset["employee"]},
-                         {x["leave_policy_id"]: x for x in dataset["leave_policy"]}, calendar,
-                         dataset["leave_balance_transaction"], dataset["leave_balance"], catalogue)
-    expense = replay_expense(dataset, catalogue, DetectionParams.from_config(cfg["expense_policies"]))
-    found = leave.submission_detections() + leave.detections + expense.submission_detections() + expense.detections
-    return sorted(found, key=lambda d: (d.record_type, d.record_id, d.exception_code, d.detected_by))
 
 
 def scenario_shortfalls(scenarios: list[dict]) -> list[dict]:

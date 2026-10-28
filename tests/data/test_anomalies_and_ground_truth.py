@@ -127,9 +127,11 @@ def test_g7_direct_reports_get_one_step_covering_l1_and_l2(full_gen):
 
 def test_legacy_approvals_post_usage_and_reconcile(full_gen):
     ds = full_gen.dataset
-    usage = [t for t in ds["leave_balance_transaction"] if t["txn_type"] == "USAGE"]
-    legacy = {r["leave_request_id"] for r in ds["leave_request"] if r["workflow_status"] == "APPROVED"}
-    assert len(legacy) == 8 + 16                                  # S01 + S02
+    legacy = {r["leave_request_id"] for r in ds["leave_request"] if r["decision_reason_code"] == "LEGACY_APPROVAL"}
+    assert len(legacy) == 8 + 16                                  # S01 + S02, marked as legacy (DEC-P7B-02)
+    assert all(r["workflow_status"] == "APPROVED" for r in ds["leave_request"] if r["leave_request_id"] in legacy)
+    usage = [t for t in ds["leave_balance_transaction"] if t["txn_type"] == "USAGE"
+             and t["reason"] == "Legacy approval (pre-enforcement)"]
     assert {t["leave_request_id"] for t in usage} <= legacy and all(t["quantity"] < 0 for t in usage)
     sums = defaultdict(Decimal)
     for t in ds["leave_balance_transaction"]:

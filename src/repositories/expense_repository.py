@@ -9,6 +9,9 @@ its ledger (V-ARITH-08). Other claims count for duplicate, pattern and split che
 services stored on them (claims never validated by the services have none and are left out of split checks).
 Routing (Phase 7A) reads approval_rule, employee, department and delegation in the same transaction; approval_step
 rows and the ASSIGNED approval_event (APE) are written for PENDING_APPROVAL.
+Phase 7B: the store is also a WorkflowStore (SqlWorkflow, base.py) for approval_service decisions: approved_amount
+at approval, RELEASE / OVERRIDE rows with committed_amount kept equal to the budget ledger, resubmission (new-round
+lines inserted, old lines kept, claim round and total updated) and idempotency_record rows.
 """
 from __future__ import annotations
 
@@ -17,14 +20,20 @@ from datetime import date
 import sqlalchemy as sa
 
 from src.common.enums import BudgetTxnType, RequestType, WorkflowStatus
-from src.repositories.base import allocate_ids, load_router, next_step_sequence, table, write_events_and_exceptions, \
-    write_steps
+from src.repositories.base import SqlWorkflow, allocate_ids, load_router, next_step_sequence, table, \
+    write_events_and_exceptions, write_steps
 from src.services.approval_routing import ApprovalRouter
 from src.services.expense_service import DetectionParams, ExpenseContext, ExpenseSubmissionResult, apply_to_claim, \
-    claim_hashes, current_lines, top_line
+    approved_amount_of, claim_hashes, current_lines, override_postings, release_postings, top_line
+
+CLAIM_WRITES = ("workflow_status", "exception_class", "decision_reason_code", "first_submitted_at", "expense_policy_id",
+                "total_amount_usd", "fx_rate_used", "receipt_status", "current_round", "total_amount",
+                "cost_center_id", "currency", "claim_period_start", "claim_period_end")
 
 
-class SqlExpenseStore:
+class SqlExpenseStore(SqlWorkflow):
+    request_type, fk, request_table = RequestType.EXPENSE.value, "expense_claim_id", "expense_claim"
+
     def __init__(self, conn: sa.Connection, params: DetectionParams) -> None:
         self.conn, self.params = conn, params
         self._lines: dict[str, list[dict]] = {}
@@ -37,8 +46,59 @@ class SqlExpenseStore:
         return dict(self.conn.execute(sa.select(t).where(t.c.expense_claim_id == claim_id).with_for_update())
                     .mappings().one())
 
+    def load_request(self, request_id: str) -> dict:
+        return self.load_claim(request_id)
+
     def router(self) -> ApprovalRouter:
         return load_router(self.conn)
+
+    def all_lines(self, claim_id: str) -> list[dict]:
+        return self._claim_lines([claim_id])[claim_id]
+
+    def add_round_lines(self, claim: dict, lines: list[dict]) -> None:
+        """docs/06 8.3 step 4: the new round's lines are inserted; earlier lines stay as they are (DEC-11)."""
+        self.conn.execute(sa.insert(table("expense_line")), lines)
+
+    def _ledger_of(self, claim_id: str) -> list[dict]:
+        t = table("cost_center_transaction")
+        return self._rows(sa.select(t).where(t.c.expense_claim_id == claim_id).order_by(t.c.transaction_id))
+
+    # WorkflowStore (approval_service) -----------------------------------------------------------------------
+    def routing_inputs(self, r: dict):
+        lines = current_lines(r, self.all_lines(r["expense_claim_id"]))
+        return (top_line(lines)["category"], r["total_amount_usd"],
+                self.round_submitted_at(r["expense_claim_id"], r["current_round"]).date())
+
+    def approval_effects(self, r: dict, at):
+        lines = current_lines(r, self.all_lines(r["expense_claim_id"]))
+        return {"approved_amount": approved_amount_of(lines, self._rows(sa.select(table("expense_policy"))))}, []
+
+    def release_postings(self, r: dict, at, reason: str) -> list[dict]:
+        return release_postings(r, self._ledger_of(r["expense_claim_id"]), at, reason)
+
+    def override_postings(self, r: dict, at) -> list[dict]:
+        return override_postings(r, self._ledger_of(r["expense_claim_id"]), at)
+
+    def post_decision_rows(self, res) -> None:
+        self._post_budget(res.budget_postings, res.correlation_id)
+
+    def _post_budget(self, postings: list[dict], correlation_id) -> None:
+        """cost_center_transaction rows; committed_amount follows RESERVATION / RELEASE (V-ARITH-08). The budget
+        rows are locked before they change (BR-BUD-02)."""
+        if not postings:
+            return
+        t, b = table("cost_center_transaction"), table("cost_center_budget")
+        for budget_id in sorted({p["cost_center_budget_id"] for p in postings}):
+            self.conn.execute(sa.select(b.c.cost_center_budget_id).where(b.c.cost_center_budget_id == budget_id)
+                              .with_for_update())
+        ids = allocate_ids(self.conn, "cost_center_transaction", "CCT", len(postings))
+        self.conn.execute(sa.insert(t), [{**p, "transaction_id": i, "correlation_id": correlation_id}
+                                         for i, p in zip(ids, postings)])
+        for p in postings:
+            sign = {BudgetTxnType.RESERVATION.value: 1, BudgetTxnType.RELEASE.value: -1}.get(p["txn_type"], 0)
+            if sign:
+                self.conn.execute(sa.update(b).where(b.c.cost_center_budget_id == p["cost_center_budget_id"])
+                                  .values(committed_amount=b.c.committed_amount + sign * p["amount"]))
 
     def next_step_sequence(self, claim_id: str) -> int:
         return next_step_sequence(self.conn, "expense_claim_id", claim_id)
@@ -94,8 +154,7 @@ class SqlExpenseStore:
         apply_to_claim(claim, lines, result)
         ec, el = table("expense_claim"), table("expense_line")
         self.conn.execute(sa.update(ec).where(ec.c.expense_claim_id == cid).values(
-            {k: claim[k] for k in ("workflow_status", "exception_class", "decision_reason_code", "first_submitted_at",
-                                   "expense_policy_id", "total_amount_usd", "fx_rate_used", "receipt_status")}))
+            {k: claim[k] for k in CLAIM_WRITES}))
         for ln in lines:
             self.conn.execute(sa.update(el).where(el.c.expense_line_id == ln["expense_line_id"]).values(
                 expense_policy_id=ln["expense_policy_id"], validation_result=ln["validation_result"],
@@ -104,14 +163,6 @@ class SqlExpenseStore:
                   "submission_round": result.submission_round, "correlation_id": result.correlation_id}
         write_events_and_exceptions(self.conn, common, result.events, result.findings, result.submitted_at)
         write_steps(self.conn, result.steps, result.correlation_id)
-        if result.budget_postings:
-            t, b = table("cost_center_transaction"), table("cost_center_budget")
-            ids = allocate_ids(self.conn, "cost_center_transaction", "CCT", len(result.budget_postings))
-            self.conn.execute(sa.insert(t), [
-                {**p, "transaction_id": i, "posted_at": result.submitted_at, "correlation_id": result.correlation_id}
-                for i, p in zip(ids, result.budget_postings)])
-            delta = sum(p["amount"] if p["txn_type"] == BudgetTxnType.RESERVATION.value else -p["amount"]
-                        for p in result.budget_postings)
-            budget_id = result.budget_postings[0]["cost_center_budget_id"]
-            self.conn.execute(sa.update(b).where(b.c.cost_center_budget_id == budget_id)
-                              .values(committed_amount=b.c.committed_amount + delta))
+        self._post_budget(result.budget_postings, result.correlation_id)
+        if result.idempotency is not None:
+            self.record_idempotency(result.idempotency)

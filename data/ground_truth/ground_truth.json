@@ -2476,7 +2476,7 @@
       "affected_record_id": "EXP-2026-000464",
       "affected_record_type": "EXPENSE",
       "expected_detection": "DETECT",
-      "expected_workflow_behaviour": "Expected outcome APPROVED (reference oracle)",
+      "expected_workflow_behaviour": "Expected outcome ESCALATED_FOR_REVIEW (reference oracle)",
       "injection_reason": "natural consequence",
       "is_planted": false,
       "issue_type": "BUDGET_EXCEEDED",
@@ -35241,12 +35241,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "1138.01",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000314",
@@ -35372,12 +35372,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "837.17",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000093",
@@ -35457,12 +35457,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "558.77",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000027",
@@ -35765,10 +35765,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "2451.03",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000320",
@@ -35869,12 +35869,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "2161.39",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000314",
@@ -35924,12 +35924,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "400.30",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000093",
@@ -35952,10 +35952,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "169991.19",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000314",
@@ -36005,10 +36005,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "154429.68",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000337",
@@ -36057,10 +36057,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "24078.28",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000034",
@@ -36083,10 +36083,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "241711.43",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000211",
@@ -36135,10 +36135,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "961.42",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000211",
@@ -36205,10 +36205,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "3546.69",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000104",
@@ -36239,12 +36239,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "78.35",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "POLICY_VERSION_EXPIRED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000138",
@@ -36259,12 +36259,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "86.32",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000322",
@@ -36279,10 +36279,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "237.26",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000214",
@@ -36309,7 +36309,7 @@
       "expected_exception_codes": [
         "MISSING_COST_CENTER"
       ],
-      "expected_final_status_at_asof": "RETURNED_FOR_CORRECTION",
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
       "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
@@ -36359,12 +36359,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "614.88",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000093",
@@ -36391,7 +36391,7 @@
       "expected_exception_codes": [
         "DUPLICATE_RECEIPT_CROSS_EMPLOYEE"
       ],
-      "expected_final_status_at_asof": "REJECTED",
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
       "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
@@ -36433,10 +36433,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "14219.67",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000307",
@@ -36469,12 +36469,12 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "1810.01",
+      "expected_approved_amount": null,
       "expected_exception_codes": [
         "BUDGET_EXCEEDED"
       ],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000322",
@@ -36505,10 +36505,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "46.41",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000248",
@@ -36523,10 +36523,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "208.73",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000089",
@@ -36549,10 +36549,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "101945.05",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000273",
@@ -36583,10 +36583,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "21013.48",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000314",
@@ -36602,10 +36602,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "92.12",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000122",
@@ -36620,10 +36620,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "25478.44",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000266",
@@ -36646,10 +36646,10 @@
       "record_type": "EXPENSE"
     },
     {
-      "expected_approved_amount": "53889.04",
+      "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
-      "expected_reimbursement_eligibility": true,
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
+      "expected_reimbursement_eligibility": false,
       "expected_route": [
         {
           "approver_id": "EMP-000003",
@@ -51861,7 +51861,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52047,7 +52047,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52065,7 +52065,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52091,7 +52091,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52135,7 +52135,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52197,7 +52197,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52215,7 +52215,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52233,7 +52233,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52251,7 +52251,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52269,7 +52269,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52295,7 +52295,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52313,7 +52313,7 @@
     {
       "expected_approved_amount": null,
       "expected_exception_codes": [],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "PENDING_APPROVAL",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {
@@ -52333,7 +52333,7 @@
       "expected_exception_codes": [
         "OVERLAPPING_PENDING_LEAVE"
       ],
-      "expected_final_status_at_asof": "APPROVED",
+      "expected_final_status_at_asof": "ESCALATED_FOR_REVIEW",
       "expected_reimbursement_eligibility": null,
       "expected_route": [
         {

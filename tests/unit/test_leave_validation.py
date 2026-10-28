@@ -216,8 +216,9 @@ def test_accrual_ledger_mismatch_is_a_technical_failure():
     assert store.requests["L1"]["workflow_status"] == "DRAFT" and store.status_events == []
 
 
-@pytest.mark.parametrize("status", ["PENDING_APPROVAL", "APPROVED", "REJECTED", "RETURNED_FOR_CORRECTION"])
+@pytest.mark.parametrize("status", ["PENDING_APPROVAL", "APPROVED", "REJECTED", "ESCALATED_FOR_REVIEW"])
 def test_only_a_draft_can_be_submitted(status):
+    """RETURNED_FOR_CORRECTION is a resubmission since Phase 7B (tests/unit/test_approval_decisions.py)."""
     store = new_store()
     store.add_request(req("N1", E1, ANNUAL_IN, date(2025, 3, 17), date(2025, 3, 18), status=status))
     with pytest.raises(IllegalTransition):

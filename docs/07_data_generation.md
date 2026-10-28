@@ -317,3 +317,7 @@ Stage S6 (outcomes written into the dataset), routing, approvals, USAGE at appro
 | S4 guard | src/data/stages/expenses.py (ExpenseGuard) | the expense service must find no code on a drawn claim (DEC-P6-02) |
 | Quantities | expenses.line_quantity, workbench.set_line, stream expense_quantities | quantity x unit = amount on every line (ASM-P6-02) |
 | Services vs oracle | src/evaluation/expense_service_vs_oracle.py | all 1,000 claims; routing codes as ROUTING_PHASE7 |
+
+## 15. As implemented in Phase 7B (assumptions in docs/09 section 12)
+
+Stage S6 (src/data/stages/outcomes.py) runs after S9: the leave and expense replays with the router and a DecisionTiming (src/services/workflow_simulation.py) process every event in time order: submissions at created_at, year-end carry-forward at 00:00 UTC on 1 January, and the simulated decisions of docs/05 9.5 made through src/services/approval_service.py. Decision instants follow ASM-P7B-02 (17:00 UTC, more than 24 hours after assignment, keyed draws on the delays stream); nothing after the as-of instant happens. S6 writes the outcome columns and the seven workflow tables (DEC-P7B-03). Raw inputs are not changed (legacy approvals carry LEGACY_APPROVAL, DEC-P7B-02), so the comparisons re-run S6 on the exported dataset and check services = oracle = dataset at as-of.

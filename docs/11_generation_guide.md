@@ -109,7 +109,7 @@ Rebuild the negative fixtures (tests only, never in data/): `python scripts\buil
 | Calculated by shared rules | business days, requested quantity, accruals, policy version, local amounts, totals, receipt hash | src/services (DEC-37), src/common/money.py |
 | Planted by construction (S5) | which records carry a scenario, scenario parameters | `anomalies*` / `boundaries*` streams |
 | Expected by the independent oracle (S9) | expected codes, routes, outcomes, natural labels | src/reference (never src/services) |
-| Decided by the workflow engine | validation results, routes, approvals, reimbursements | not yet: Phases 7-8 |
+| Decided by the workflow engine | validation results, routes, approvals and decision times (S6, Phase 7B); reimbursements | src/services through stage S6; reimbursements in Phase 8 |
 
 ## 6. Troubleshooting
 
@@ -119,3 +119,12 @@ Rebuild the negative fixtures (tests only, never in data/): `python scripts\buil
 | `refusing to load into database '...'` | `--load` only accepts lea_dev or a *_test database (RK-13) |
 | `could not draw a valid leave request` | volumes far above the design (many requests for few employees) exhaust balances; lower `--leave-requests` |
 | fingerprint differs between machines | different package versions; compare `pip freeze` with requirements.txt |
+
+## 7. Phase 7B: stage S6
+
+The generator now writes workflow outcomes at the as-of date (stage S6): statuses, approval steps and events, approval attempts, status events, exception rows, idempotency records, the budget ledger and the year-end carry-forward rows. Check them against the independent oracle with:
+
+    python -m src.evaluation.leave_service_vs_oracle
+    python -m src.evaluation.expense_service_vs_oracle
+
+Both read the seed and as-of date from data/manifest.json and must print DISAGREE 0.

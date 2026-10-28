@@ -18,8 +18,8 @@ from src.data.stages import GenParams
 from src.services.leave_balance_service import accrual_schedule
 
 CORRELATION_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "urn:lea:generator")
-TXN_ORDER = {LeaveTxnType.OPENING.value: 0, LeaveTxnType.CARRY_FORWARD.value: 1, LeaveTxnType.ACCRUAL.value: 2,
-             LeaveTxnType.USAGE.value: 3}
+TXN_ORDER = {LeaveTxnType.OPENING.value: 0, LeaveTxnType.CARRY_FORWARD.value: 1,
+             LeaveTxnType.CARRY_FORWARD_EXPIRY.value: 1.5, LeaveTxnType.ACCRUAL.value: 2, LeaveTxnType.USAGE.value: 3}
 ZERO = Decimal("0.0")
 
 

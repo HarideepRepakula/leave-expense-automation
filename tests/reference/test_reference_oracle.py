@@ -206,5 +206,6 @@ def test_escalated_claim_keeps_its_budget_reservation_until_the_decision(tables)
                                   "line_amount": Decimal("1000.00"), "receipt_id": f"RCP-{i}"})
     x = Oracle(t, CONFIG).expenses()
     assert x["EXP-2026-000902"].submission_codes == {"DUPLICATE_RECEIPT_CROSS_EMPLOYEE"}
-    assert x["EXP-2026-000902"].final_status == "REJECTED"
+    assert x["EXP-2026-000902"].eventual_status == "REJECTED"
+    assert x["EXP-2026-000902"].final_status == "ESCALATED_FOR_REVIEW"     # no process owner in these tables
     assert x["EXP-2026-000903"].submission_codes == {"BUDGET_EXCEEDED"}

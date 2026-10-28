@@ -11,8 +11,11 @@ request is routed on its leave type and quantity as of the submission date; NO_V
 join the codes (SOFT -> ESCALATED_FOR_REVIEW). Approval steps are created only for an outcome of PENDING_APPROVAL.
 A store without a router (the generator guards) does no routing, as in Phase 5.
 
-Not here yet, by phase: decisions and resubmission (Phase 7B); audit_event rows and idempotency keys (Phase 8).
-USAGE is posted at approval (Phase 7B) through leave_balance_service.usage_postings.
+Resubmission (Phase 7B, docs/06 8.3): submit_leave() on a RETURNED_FOR_CORRECTION request opens round + 1 with
+the requester's corrections (dates, half-day flags, medical certificate flag); the request id never changes,
+first_submitted_at keeps the first submission, and every earlier status event, exception and step stays as it was.
+Decisions (approval_service) post USAGE at approval through approval_postings() (BR-LBAL-05).
+Not here yet: audit_event rows and idempotency records of first submissions (Phase 8).
 """
 from __future__ import annotations
 
@@ -24,6 +27,8 @@ from typing import Protocol
 
 from src.common.enums import LeaveType, RequestType, WorkflowStatus
 from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
+from src.services.approval_service import DecisionResult, IdempotentReplay, InMemoryWorkflow, \
+    resubmission_key, resubmission_record
 from src.services.calendar_service import (
     HolidayCalendar,
     half_days_on_non_business_days,
@@ -31,14 +36,21 @@ from src.services.calendar_service import (
     requested_quantity,
 )
 from src.services.exception_service import Classification, ExceptionCatalogue, Finding, FindingSet
-from src.services.leave_balance_service import BalanceBook, Reservation, negative_floor
-from src.services.lifecycle import IllegalTransition, check_transition
+from src.services.leave_balance_service import BalanceBook, Reservation, negative_floor, usage_postings
+from src.services.lifecycle import check_resubmission, check_transition
 
 ZERO = Decimal("0")
 HALF = Decimal("0.5")
 OPEN = frozenset({WorkflowStatus.PENDING_APPROVAL.value, WorkflowStatus.ESCALATED_FOR_REVIEW.value})
 APPROVED = WorkflowStatus.APPROVED.value
 HOLDING = OPEN | {APPROVED}          # requests that hold dates and balance (BR-LV-09..11, BR-LBAL-07)
+RESUBMIT_FIELDS = frozenset({"start_date", "end_date", "start_half_day", "end_half_day", "medical_cert_flag"})
+LEGACY_APPROVAL = "LEGACY_APPROVAL"  # decision_reason_code of a legacy approval (AM-A3, raw input, DEC-P7B-02)
+APPROVAL_REASON = "Approved"
+
+
+def is_legacy(r: dict) -> bool:
+    return r["workflow_status"] == APPROVED and r.get("decision_reason_code") == LEGACY_APPROVAL
 
 
 class LeaveInputError(ValueError):
@@ -72,6 +84,13 @@ def leave_parts(calendar: HolidayCalendar, r: dict, country: str) -> dict[int, D
     """BR-LBAL-09: quantity per leave year (a half-day reduces the year it falls in)."""
     return quantity_by_year(calendar, r["start_date"], r["end_date"], country, r["start_half_day"],
                             r["end_half_day"])
+
+
+def approval_postings(calendar: HolidayCalendar, r: dict, country: str, policy: dict, at: datetime) -> list[dict]:
+    """BR-LBAL-05/09: USAGE per leave year, dated at approval. UNPAID has no balance (ASM-047)."""
+    if policy["leave_type"] == LeaveType.UNPAID:
+        return []
+    return usage_postings(r, leave_parts(calendar, r, country), at.date(), APPROVAL_REASON)
 
 
 @dataclass
@@ -194,6 +213,8 @@ class SubmissionResult:
     events: list[dict]              # request_status_event payloads, in order
     routing: Routing | None = None  # None when not routed (rejected/returned, or a store without a router)
     steps: list[dict] = field(default_factory=list)   # approval_step rows (PENDING_APPROVAL only)
+    changes: dict = field(default_factory=dict)       # resubmission: corrected columns and the new current_round
+    idempotency: dict | None = None                   # resubmission: the completed idempotency_record
 
     @property
     def status(self) -> str:
@@ -220,16 +241,33 @@ class LeaveStore(Protocol):
 
     def record_submission(self, result: SubmissionResult) -> None: ...
 
+    def idempotency(self, actor_id: str, key: str) -> dict | None: ...
+
 
 def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalogue, at: datetime,
-                 actor_id: str | None, correlation_id: uuid.UUID) -> SubmissionResult:
+                 actor_id: str | None, correlation_id: uuid.UUID, changes: dict | None = None,
+                 idempotency_key: str | None = None) -> SubmissionResult:
     """docs/06 8.1 steps 2-4 and 7 for leave: lock and load, validate, classify, record the three transitions
-    (DRAFT -> SUBMITTED -> VALIDATING -> outcome) in one store transaction."""
-    r = store.load_request(request_id)
-    if r["workflow_status"] != WorkflowStatus.DRAFT.value:
-        check_transition(r["workflow_status"], WorkflowStatus.SUBMITTED.value)   # raises when illegal
-        raise IllegalTransition(f"{request_id}: resubmission ({r['workflow_status']} -> SUBMITTED) arrives in "
-                                f"Phase 7")
+    (DRAFT -> SUBMITTED -> VALIDATING -> outcome) in one store transaction. On a RETURNED_FOR_CORRECTION request
+    it is the resubmission of docs/06 8.3: round + 1 with `changes` (RESUBMIT_FIELDS only), the first transition
+    is RETURNED_FOR_CORRECTION -> SUBMITTED, and the idempotency key is recorded."""
+    stored = store.load_request(request_id)
+    first = stored["workflow_status"]
+    key, body, r = None, None, stored
+    if first == WorkflowStatus.DRAFT.value:
+        if changes:
+            raise ValueError("changes apply to a resubmission only")
+    else:
+        unknown = set(changes or {}) - RESUBMIT_FIELDS
+        if unknown:
+            raise ValueError(f"fields that cannot change on resubmission: {sorted(unknown)}")
+        key = idempotency_key or resubmission_key(actor_id, request_id, stored["current_round"] + 1)
+        known = store.idempotency(actor_id, key)
+        if known is not None:
+            raise IdempotentReplay(known)
+        check_resubmission(stored, actor_id)
+        body = {"request": request_id, "changes": changes or {}}
+        r = {**stored, **(changes or {}), "current_round": stored["current_round"] + 1}
     ctx = store.context(r)
     validation = validate_leave(r, ctx, at)
     router = store.router()
@@ -239,7 +277,7 @@ def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalog
                                validation.quantity, at.date())
     codes = validation.codes + [f.code for f in (routing.findings if routing else [])]
     classification = catalogue.classify(codes)
-    path = [WorkflowStatus.DRAFT.value, WorkflowStatus.SUBMITTED.value, WorkflowStatus.VALIDATING.value,
+    path = [first, WorkflowStatus.SUBMITTED.value, WorkflowStatus.VALIDATING.value,
             classification.status_after_validation]
     events = []
     for prev, new in zip(path, path[1:]):
@@ -257,6 +295,10 @@ def submit_leave(store: LeaveStore, request_id: str, catalogue: ExceptionCatalog
                             store.next_step_sequence(request_id))
     result = SubmissionResult(request_id, r["current_round"], at, actor_id, correlation_id, validation,
                               classification, events, routing, steps)
+    if key is not None:
+        result.changes = {**(changes or {}), "current_round": r["current_round"]}
+        result.idempotency = resubmission_record(actor_id, RequestType.LEAVE.value, request_id, key, body, at,
+                                                 classification.status_after_validation)
     store.record_submission(result)
     return result
 
@@ -273,11 +315,15 @@ def calculated_values(v: LeaveValidation, c: Classification, codes: list[str], r
 
 
 # --- in-memory store -------------------------------------------------------------------------------------------
-class InMemoryLeaveStore:
-    """A LeaveStore over plain rows (generator guards, the replay, unit tests). Same contract as the DB store."""
+class InMemoryLeaveStore(InMemoryWorkflow):
+    """A LeaveStore and WorkflowStore over plain rows (generator guards, the S6 simulation, unit tests). Same
+    contract as the DB store. `roles`: employee id -> role names (process-owner decisions)."""
+
+    request_type = RequestType.LEAVE.value
 
     def __init__(self, employees: dict[str, dict], policies: dict[str, dict], calendar: HolidayCalendar,
-                 ledger: list[dict], balances: list[dict], router: ApprovalRouter | None = None) -> None:
+                 ledger: list[dict], balances: list[dict], router: ApprovalRouter | None = None,
+                 roles: dict[str, set[str]] | None = None) -> None:
         self.employees, self.policies, self.calendar, self._router = employees, policies, calendar, router
         self.balance_owner = {b["leave_balance_id"]: (b["employee_id"], b["leave_policy_id"]) for b in balances}
         self.years: dict[tuple[str, str], set[int]] = {}
@@ -292,9 +338,29 @@ class InMemoryLeaveStore:
         self.exceptions: list[dict] = []
         self.steps: dict[str, list[dict]] = {}
         self.approval_events: list[dict] = []
+        self.init_workflow(roles)
 
     def router(self) -> ApprovalRouter | None:
         return self._router
+
+    # WorkflowStore (approval_service) -----------------------------------------------------------------------
+    def routing_inputs(self, r: dict) -> tuple[str, Decimal, date]:
+        """Leave type, quantity, and the round's submission date (ASM-P7A-01)."""
+        return (self.policies[r["leave_policy_id"]]["leave_type"], r["requested_quantity"],
+                self.results[r["leave_request_id"]].submitted_at.date())
+
+    def approval_effects(self, r: dict, at: datetime) -> tuple[dict, list[dict]]:
+        emp = self.employees[r["employee_id"]]
+        return {}, approval_postings(self.calendar, r, emp["country"], self.policies[r["leave_policy_id"]], at)
+
+    def release_postings(self, r: dict, at: datetime, reason: str) -> list[dict]:
+        return []                       # leave reserves nothing in a ledger (BR-LBAL-07)
+
+    def override_postings(self, r: dict, at: datetime) -> list[dict]:
+        return []
+
+    def post_decision_rows(self, res: DecisionResult) -> None:
+        self.post(res.leave_postings)
 
     def next_step_sequence(self, request_id: str) -> int:
         return len(self.steps.get(request_id, [])) + 1
@@ -332,10 +398,14 @@ class InMemoryLeaveStore:
     def record_submission(self, result: SubmissionResult) -> None:
         r = self.requests[result.request_id]
         v, c = result.validation, result.classification
+        r.update(result.changes)
         r.update(workflow_status=c.status_after_validation, exception_class=c.exception_class,
-                 decision_reason_code=c.decision_reason_code, first_submitted_at=result.submitted_at,
+                 decision_reason_code=c.decision_reason_code,
+                 first_submitted_at=r["first_submitted_at"] or result.submitted_at,
                  business_day_count=Decimal(v.business_days).quantize(Decimal("0.1")), requested_quantity=v.quantity)
         self.results[result.request_id] = result
+        if result.idempotency is not None:
+            self.record_idempotency(result.idempotency)
         for e in result.events:
             self.status_events.append({"request_id": result.request_id, "submission_round": result.submission_round,
                                        "correlation_id": result.correlation_id, **e})
@@ -344,5 +414,5 @@ class InMemoryLeaveStore:
                                     "exception_code": f.code, "detail": f.detail, "detected_at": result.submitted_at,
                                     "detected_by": "SUBMISSION", "correlation_id": result.correlation_id})
         if result.steps:
-            self.steps.setdefault(result.request_id, []).extend(result.steps)
+            self.steps.setdefault(result.request_id, []).extend(dict(s) for s in result.steps)
             self.approval_events.append(assignment_event(result.steps[0], result.correlation_id))

@@ -5,22 +5,33 @@ exception codes, the expected ordered approval route and the expected outcome. I
 with src/services or src/data (tests/test_reference_independence.py): calendar, accrual, policy resolution,
 routing and every check are re-implemented here in plain table-driven Python (DEC-P4-01).
 
-Timing (ASM-P4-03): decision delays, resubmissions and payments belong to stage S6 (Phase 7). Until then the
-expected status is the EVENTUAL outcome with no time limit: clean -> APPROVED; HARD -> REJECTED; CORRECTABLE ->
-RETURNED_FOR_CORRECTION; SOFT -> the simulated process-owner decision (docs/05 9.5), else ESCALATED_FOR_REVIEW.
-An earlier request whose eventual outcome holds balance or dates (APPROVED or ESCALATED) is treated as still
-pending when a later request is checked against it (ASM-P4-04). Budget (BR-BUD-02..04, owner decision on AMB-P6-01,
-Phase 7A): a claim's reservation is kept unless validation itself rejects or returns the claim (a HARD or
-CORRECTABLE submission code); an escalated claim keeps it until the final decision, whatever that decision is.
+Outcomes. The EVENTUAL outcome (eventual_status) has no time limit: clean -> APPROVED; HARD -> REJECTED;
+CORRECTABLE -> RETURNED_FOR_CORRECTION; SOFT -> the simulated process-owner decision (docs/05 9.5), else
+ESCALATED_FOR_REVIEW. An earlier request whose eventual outcome holds balance or dates (APPROVED or ESCALATED) is
+treated as still pending when a later request is checked against it (ASM-P4-04).
+Timing (Phase 7B, ASM-P4-03 completed): final_status is the status AT the as-of instant (midnight UTC at the start
+of AS_OF_DATE), re-derived here from config/generation.yaml alone, independently of the engine: the process owner
+(lowest employee id with PROCESS_OWNER, not the requester) decides an escalated request, and each route step is
+decided by its approver, at 17:00 UTC on the max(1, delay)-th business day of the decider's country after the
+assignment day (counting from the next day when assigned at or after 17:00); delay = a keyed draw on the delays
+stream (key: request id, round 1, level or PROCESS_OWNER), re-implemented here with numpy. A decision after the
+as-of instant has not happened: PENDING_APPROVAL or ESCALATED_FOR_REVIEW.
+Budget (BR-BUD-02..04, owner decision on AMB-P6-01): a claim's reservation is kept unless validation itself rejects
+or returns the claim; an escalated claim keeps it until the process owner's decision, and a later claim submitted
+at or after a reject or return decision no longer sees it (Phase 7B timing).
+Legacy approvals (S01/S02) are APPROVED rows with decision_reason_code LEGACY_APPROVAL (raw-input marker); every
+other non-DRAFT row is a submission, whatever status an S6 run wrote on it.
 """
 from __future__ import annotations
 
 import calendar as _calendar
+import hashlib
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 ZERO = Decimal("0")
@@ -28,6 +39,12 @@ CENT = Decimal("0.01")
 LEVELS = ["L1", "L2", "L3", "L4", "L5"]
 HOLDS = {"APPROVED", "ESCALATED_FOR_REVIEW", "PENDING_APPROVAL"}   # outcomes that keep balance/budget/dates
 SEVERITY_ROUTE = {"HARD": "REJECTED", "CORRECTABLE": "RETURNED_FOR_CORRECTION"}
+LEGACY = "LEGACY_APPROVAL"
+PO = "PROCESS_OWNER"
+
+
+def is_legacy(r: dict) -> bool:
+    return r["workflow_status"] == "APPROVED" and r.get("decision_reason_code") == LEGACY
 
 
 def _yaml(path: Path) -> dict:
@@ -50,7 +67,8 @@ class Expectation:
     batch_codes: set[str] = field(default_factory=set)
     route: list[dict] | None = None
     required_levels: list[str] = field(default_factory=list)
-    final_status: str = "DRAFT"
+    final_status: str = "DRAFT"         # at the as-of instant once leave() / expenses() has finished
+    eventual_status: str = "DRAFT"      # without the as-of cut-off (ASM-P4-03)
     eligible: bool | None = None
     approved_amount: Decimal | None = None
     facts: dict = field(default_factory=dict)
@@ -77,6 +95,12 @@ class ReferenceConfig:
         self.max_line_age = int(det["max_line_age_days"])
         self.split_window = int(det["split_window_days"])
         self.split_threshold = Decimal(det["split_threshold_usd"])
+        gen = _yaml(config_dir / "generation.yaml")
+        self.master_seed, self.streams = int(gen["master_seed"]), list(gen["streams"])
+        asof = gen["as_of_date"]
+        self.as_of_date = asof if isinstance(asof, date) else date.fromisoformat(str(asof))
+        self.decision_hour = int(gen["decisions"]["decision_hour_utc"])
+        self.delay_ranges = {k: (int(v[0]), int(v[1])) for k, v in gen["decisions"]["delay_business_days"].items()}
 
     @staticmethod
     def _rule(r: dict, default_start) -> dict:
@@ -94,9 +118,16 @@ class ReferenceConfig:
 
 class Oracle:
     def __init__(self, tables: dict[str, list[dict]], config_dir: Path,
-                 rules_override: list[dict] | None = None) -> None:
+                 rules_override: list[dict] | None = None, seed: int | None = None, as_of: date | None = None) -> None:
         self.cfg = ReferenceConfig(config_dir, rules_override)
         self.t = tables
+        root = np.random.SeedSequence(self.cfg.master_seed if seed is None else seed)
+        self.delay_seed = root.spawn(len(self.cfg.streams))[self.cfg.streams.index("delays")]
+        self.as_of = datetime.combine(as_of or self.cfg.as_of_date, time(0, 0), tzinfo=timezone.utc)
+        role_names = {r["role_id"]: r["role_name"] for r in tables.get("role", [])}
+        user_emp = {u["user_id"]: u["employee_id"] for u in tables.get("application_user", [])}
+        self.process_owners = sorted({user_emp[ur["user_id"]] for ur in tables.get("user_role", [])
+                                      if role_names.get(ur["role_id"]) == PO and user_emp.get(ur["user_id"])})
         self.emps = {e["employee_id"]: e for e in tables["employee"]}
         self.root = next((e["employee_id"] for e in self.emps.values() if e["grade"] == "G7"), None)
         self.heads = {d["department_id"]: d["head_employee_id"] for d in tables["department"]}
@@ -240,6 +271,64 @@ class Oracle:
                  "covers": sorted(x["covers"], key=LEVELS.index), "delegated_from": x["delegated_from"]}
                 for x in route]
 
+    # --- timing (Phase 7B): when each simulated decision happens -------------------------------------------------
+    def delay(self, key: tuple, kind: str) -> int:
+        lo, hi = self.cfg.delay_ranges[kind]
+        s = self.delay_seed
+        words = tuple(int.from_bytes(hashlib.sha256(str(k).encode()).digest()[:8], "big") for k in key)
+        child = np.random.SeedSequence(s.entropy, spawn_key=tuple(s.spawn_key) + words, pool_size=s.pool_size)
+        return int(np.random.Generator(np.random.PCG64(child)).integers(lo, hi + 1))
+
+    def decided_at(self, assigned: datetime, kind: str, key: tuple, decider: str) -> datetime:
+        n = max(1, self.delay(key, kind))
+        hour = self.cfg.decision_hour
+        d = assigned.date() + timedelta(days=2 if assigned.time() >= time(hour) else 1)
+        country = self.emps[decider]["country"]
+        while True:
+            if self.is_business_day(d, country):
+                n -= 1
+                if n == 0:
+                    return datetime.combine(d, time(hour), tzinfo=timezone.utc)
+            d += timedelta(days=1)
+
+    def po_action(self, codes: set[str]) -> str | None:
+        soft = {c for c in codes if self.cfg.severity[c] == "SOFT"}
+        if soft & self.cfg.po_reject:
+            return "REJECTED"
+        if soft & self.cfg.po_return:
+            return "RETURNED_FOR_CORRECTION"
+        if soft and soft <= self.cfg.po_approve:
+            return "APPROVED"
+        return None
+
+    def at_as_of(self, x: Expectation, emp_id: str, submitted: datetime) -> tuple[str, datetime | None]:
+        """(status at the as-of instant, instant of a process-owner reject / return, else None)."""
+        if {self.cfg.severity[c] for c in x.submission_codes} & {"HARD", "CORRECTABLE"}:
+            return x.final_status, None
+        t = submitted
+        if any(self.cfg.severity[c] == "SOFT" for c in x.submission_codes):
+            action = self.po_action(x.submission_codes)
+            owner = next((p for p in self.process_owners if p != emp_id), None)
+            if action is None or owner is None:
+                return "ESCALATED_FOR_REVIEW", None
+            t = self.decided_at(submitted, PO, (x.record_id, 1, PO), owner)
+            if t > self.as_of:
+                return "ESCALATED_FOR_REVIEW", None
+            if action != "APPROVED":
+                return action, t
+        for step in x.route or []:
+            t = self.decided_at(t, step["level"], (x.record_id, 1, step["level"]), step["approver_id"])
+            if t > self.as_of:
+                return "PENDING_APPROVAL", None
+        return "APPROVED", None
+
+    @staticmethod
+    def settle(out: dict[str, Expectation]) -> None:
+        """final_status becomes the status at as-of; the eventual one is kept (eventual_status)."""
+        for x in out.values():
+            x.eventual_status = x.final_status
+            x.final_status = x.facts.pop("status_at_asof", x.final_status)
+
     # --- outcome (docs/05 9.3 and 9.5) -----------------------------------------------------------------------
     def outcome(self, codes: set[str]) -> str:
         sev = {self.cfg.severity[c] for c in codes}
@@ -342,7 +431,7 @@ class Oracle:
                 continue
             sub = r["created_at"].date()
             parts = self.parts_by_year(r, country)
-            if r["workflow_status"] == "APPROVED":
+            if is_legacy(r):
                 # Legacy approval (S01/S02, AM-A3): USAGE posted on the submission date, no validation ran.
                 x.facts["legacy"] = True
                 x.final_status = "APPROVED"
@@ -393,6 +482,7 @@ class Oracle:
             if pol["leave_type"] == "SICK" and limit is not None and qty > Decimal(limit) and not r["medical_cert_flag"]:
                 codes.add("MEDICAL_CERT_REQUIRED")
             self._finish(x, "LEAVE", emp["employee_id"], pol["leave_type"], qty, sub)
+            x.facts["status_at_asof"] = self.at_as_of(x, emp["employee_id"], r["created_at"])[0]
             if x.final_status in HOLDS:
                 take(r, emp, pol, parts, approved=x.final_status == "APPROVED")
 
@@ -405,6 +495,7 @@ class Oracle:
                         and frozenset((a["leave_request_id"], b["leave_request_id"])) not in reviewed:
                     out[a["leave_request_id"]].batch_codes.add("OVERLAPPING_APPROVED_LEAVE")
                     out[b["leave_request_id"]].batch_codes.add("OVERLAPPING_APPROVED_LEAVE")
+        self.settle(out)
         return out
 
     # --- expenses ------------------------------------------------------------------------------------------
@@ -447,7 +538,7 @@ class Oracle:
         out: dict[str, Expectation] = {}
         seen_hashes: dict[str, list[str]] = {}           # hash -> employees of earlier submitted claims
         split_pool: dict[tuple, list[tuple]] = {}        # (employee, primary category) -> items
-        budget_used: dict[tuple, Decimal] = {}
+        budget_held: dict[tuple, list[tuple[Decimal, datetime | None]]] = {}   # (amount, released at)
         signatures: dict[str, set] = {}
 
         for c in claims:
@@ -511,11 +602,14 @@ class Oracle:
                 codes.add("SPLIT_CLAIM_SUSPECTED")
             bkey = (c["cost_center_id"], sub.year)
             budget = self.budgets.get(bkey) if cc else None
-            if budget is not None and budget_used.get(bkey, ZERO) + total > budget["budget_amount"]:
+            held = sum((a for a, released in budget_held.get(bkey, [])
+                        if released is None or released > c["created_at"]), ZERO)
+            if budget is not None and held + total > budget["budget_amount"]:
                 codes.add("BUDGET_EXCEEDED")                    # BR-BUD-03
 
             self._finish(x, "EXPENSE", c["employee_id"], top["category"], usd, sub)
-            if x.final_status == "APPROVED":
+            x.facts["status_at_asof"], released_at = self.at_as_of(x, c["employee_id"], c["created_at"])
+            if x.facts["status_at_asof"] == "APPROVED":     # amounts as they stand at as-of (DEC-P7B-05)
                 x.approved_amount = sum((min(ln["line_amount"], pols[ln["expense_line_id"]]["per_line_limit"])
                                          for ln in cl), ZERO).quantize(CENT)   # BR-EX-14
                 x.eligible = x.approved_amount > 0
@@ -523,7 +617,7 @@ class Oracle:
                 x.eligible = False
             validation_releases = {self.cfg.severity[k] for k in codes} & {"HARD", "CORRECTABLE"}
             if budget is not None and not validation_releases:          # BR-BUD-02/04 (AMB-P6-01)
-                budget_used[bkey] = budget_used.get(bkey, ZERO) + total
+                budget_held.setdefault(bkey, []).append((total, released_at))
             for h in hashes:
                 seen_hashes.setdefault(h, []).append(c["employee_id"])
             signatures.setdefault(c["employee_id"], set()).add(signature)
@@ -545,6 +639,7 @@ class Oracle:
             for group in self.split_groups(items):
                 for cid in group:
                     out[cid].batch_codes.add("SPLIT_CLAIM_SUSPECTED")
+        self.settle(out)
         return out
 
     def compute(self) -> dict[tuple[str, str], Expectation]:
@@ -558,9 +653,9 @@ def owner_status(out: dict[str, Expectation], claim_id: str) -> bool:
     return out[claim_id].final_status != "DRAFT"
 
 
-def compute_expectations(tables: dict[str, list[dict]], config_dir: Path,
-                         rules_override: list[dict] | None = None) -> dict[tuple[str, str], Expectation]:
-    return Oracle(tables, config_dir, rules_override).compute()
+def compute_expectations(tables: dict[str, list[dict]], config_dir: Path, rules_override: list[dict] | None = None,
+                         seed: int | None = None, as_of: date | None = None) -> dict[tuple[str, str], Expectation]:
+    return Oracle(tables, config_dir, rules_override, seed, as_of).compute()
 
 
 def ledger_accrual_mismatches(tables: dict[str, list[dict]], config_dir: Path, as_of: date) -> list[str]:

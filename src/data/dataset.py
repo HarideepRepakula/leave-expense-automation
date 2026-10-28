@@ -34,6 +34,14 @@ TABLE_ORDER: list[str] = [
     "receipt",
     "expense_claim",
     "expense_line",
+    # Stage S6 (Phase 7B): workflow outcomes
+    "cost_center_transaction",
+    "approval_step",
+    "approval_event",
+    "approval_attempt",
+    "request_status_event",
+    "request_exception",
+    "idempotency_record",
 ]
 
 

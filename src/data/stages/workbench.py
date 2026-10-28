@@ -29,6 +29,7 @@ from src.data.stages.leave import LeaveGuard, policy_family
 from src.services.calendar_service import HolidayCalendar, quantity_by_year, requested_quantity
 from src.services.leave_balance_service import accrual_schedule, usage_postings
 from src.services.leave_batch import LEGACY_REASON
+from src.services.leave_request_service import LEGACY_APPROVAL
 from src.services.policy_resolver import resolve_version
 
 ZERO = Decimal("0")
@@ -193,6 +194,7 @@ class Workbench:
 
     def approve_legacy(self, r: dict) -> None:
         r["workflow_status"] = WorkflowStatus.APPROVED.value
+        r["decision_reason_code"] = LEGACY_APPROVAL     # raw-input marker of a legacy approval (DEC-P7B-02)
         self.legacy_approved.append(r["leave_request_id"])
 
     # --- expenses --------------------------------------------------------------------------------------------

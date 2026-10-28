@@ -45,8 +45,9 @@ def test_fixed_master_volumes(run):
 
 
 def test_every_table_produced_and_non_empty(run):
+    """The Phase 3 baseline fills every table except the workflow outcomes, which only stage S6 builds."""
     _, _, ds = run
-    assert [t for t in TABLE_ORDER if not ds.get(t)] == []
+    assert [t for t in TABLE_ORDER if not ds.get(t)] == list(TABLE_ORDER[TABLE_ORDER.index("cost_center_transaction"):])
 
 
 def test_primary_keys_unique_and_well_formed(run):
@@ -208,7 +209,7 @@ def test_leave_baseline_is_valid_for_the_independent_oracle(run):
     for r in ds["leave_request"]:
         x = expected[r["leave_request_id"]]
         assert x.codes == [], (r["leave_request_id"], x.codes)
-        assert x.final_status == ("DRAFT" if r["workflow_status"] == "DRAFT" else "APPROVED")
+        assert x.eventual_status == ("DRAFT" if r["workflow_status"] == "DRAFT" else "APPROVED")
         assert WINDOW_START <= r["start_date"] and r["end_date"] <= date(2026, 12, 31)   # ASM-P5-06, ASM-P3-13
     country = {e["employee_id"]: e["country"] for e in ds["employee"]}
     cross = [r for r in ds["leave_request"] if r["start_date"].year != r["end_date"].year]

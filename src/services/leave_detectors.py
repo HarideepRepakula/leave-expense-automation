@@ -5,7 +5,10 @@
   again (ASM-P4-07).
 - NEGATIVE_BALANCE_UNPERMITTED: after a USAGE posting the balance of that year is below the policy floor (AM-A4b).
   The balance uses the same BalanceBook as validation, so requests that were still open when the usage was posted
-  count as reserved (ASM-P5-05). A policy-permitted negative balance (AM-A4a) is not a finding.
+  count as reserved (ASM-P5-05). A policy-permitted negative balance (AM-A4a) is not a finding. Only usage that
+  never passed the submission balance check is examined, i.e. legacy approvals (ASM-P7B-09): a request approved
+  through the workflow was checked at submission against every open reservation, and approval only turns its
+  reservation into usage.
 """
 from __future__ import annotations
 
@@ -52,6 +55,8 @@ def negative_balance_unpermitted(store: InMemoryLeaveStore) -> list[Detection]:
         book = store.book(emp_id, pol_id)
         floor = negative_floor(store.policies[pol_id])
         for t in sorted(usage, key=lambda t: (t["txn_date"], t["leave_request_id"])):
+            if t["leave_request_id"] in store.results:
+                continue                              # validated at submission (ASM-P7B-09)
             r = store.requests[t["leave_request_id"]]
             year = balance_year(t["leave_balance_id"])
             after = book.available(year, t["txn_date"], exclude=r["leave_request_id"],

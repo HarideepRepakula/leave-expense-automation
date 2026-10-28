@@ -114,7 +114,7 @@ def planned_counts(cfg: dict, p: GenParams) -> dict[str, int]:
 def build_ground_truth(cfg: dict, p: GenParams, dataset: dict[str, list[dict]], plants: list[Plant],
                        boundaries: list[Boundary], leave_map: dict[str, str], claim_map: dict[str, str],
                        config_dir: Path, fixtures_dir: Path | None = None) -> GroundTruth:
-    exp = compute_expectations(dataset, config_dir)
+    exp = compute_expectations(dataset, config_dir, seed=p.seed, as_of=p.as_of)
     remap = {"LEAVE": leave_map, "EXPENSE": claim_map}
     problems: list[str] = []
     planted: dict[tuple[str, str], set[str]] = {}

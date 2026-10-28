@@ -1,7 +1,7 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 7A (routing and approval steps; Phase 7 split into 7A and 7B, owner 2026-10-28)
-Status: COMPLETE, awaiting "APPROVED PHASE 7A". Not committed. Next: Phase 7B (after approval).
+Current phase: Phase 7B (decisions, resubmission, process-owner decisions, S6 timing, CARRY_FORWARD rows)
+Status: COMPLETE except the S19 dataset change (plan below, waiting for the owner's OK). Awaiting "APPROVED PHASE 7B".
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -22,6 +22,7 @@ Phase 5: APPROVED 2026-10-28. AMB-P5-01..04 accepted as applied. The OneDrive co
 Phase 6: APPROVED 2026-10-28 (commit c4f1590). AMB-P6-01..05 accepted. Owner instruction for Phase 7A: change the
   oracle so an escalated expense claim keeps its budget reservation until the final decision (reservation kept
   unless validation rejects or returns the claim), matching the services and BR-BUD-03/04; re-run both comparisons.
+Phase 7A: APPROVED 2026-10-28 (commit 4922b17). AMB-P7A-01..04, DEC-P7A-02 and DEC-P7A-04 accepted as applied.
 Phase 7 plan (owner 2026-10-28):
   7A = oracle budget change; routing service src/services/approval_routing.py (bands lower-exclusive/upper-inclusive,
        priority, RULE_CONFLICT, NO_VALID_APPROVAL_PATH); approvers L1-L5 with substitution, delegation and
@@ -35,6 +36,81 @@ Phase 7 plan (owner 2026-10-28):
        Dataset change decided in 7B and shown to the owner BEFORE it is made; not touched in 7A.
   S22 timing (proposed for 7B): decisions at 17:00 UTC on a business day at least one business day after
        assignment, so an S22 partner submitted at most 24 h earlier is never decided first (closes AMB-P4-04).
+
+## Phase 7B record
+
+Scope implemented: src/services/approval_service.py (decide_step: APPROVE / REJECT / RETURN with guards SELF_APPROVAL,
+UNAUTHORIZED_APPROVER, DUPLICATE_ACTION, STEP_NOT_PENDING, LEVEL_SKIPPED, EXPIRED_RULE; an approval_attempt for every
+call; idempotency keys per docs/06 8.2 with replay and conflict; next-step assignment; USAGE at approval; approved_amount;
+RELEASE on reject / return. decide_escalated: process owner, or L4 for BUDGET_EXCEEDED only: send on (steps created),
+APPROVE, REJECT, RETURN; OVERRIDE posting). Resubmission in submit_leave / submit_expense (round + 1, same ids,
+first_submitted_at kept, new-round lines, history append-only, max 3 rounds, RESUBMIT idempotency). Both in-memory and
+both PostgreSQL stores implement the WorkflowStore. Year-end CARRY_FORWARD / EXPIRY rows replace the recompute
+(AMB-P5-02). Stage S6 (src/data/stages/outcomes.py, src/services/workflow_simulation.py): decisions with timing
+(17:00 UTC, more than 24 h after assignment, S22 rule) written into the dataset; the oracle got its own timing
+model. Services import nothing from src/reference (test passes); ground truth isolated (tests pass); workflow
+status, exception class, processing status and audit/attempt rows stay separate columns and tables.
+Not done (DEC-P7B-06): S19 dataset change (waiting), reimbursement and audit_event (Phase 8), dataset resubmissions /
+cancellations and S11 / S12 / S18 attempt rows (AMB-P7B-02/03).
+
+Files created: src/services/{approval_service,workflow_simulation}.py; src/data/stages/outcomes.py;
+tests/unit/test_approval_decisions.py; tests/db/test_approval_decisions_db.py; tests/data/test_outcomes_on_dataset.py.
+Files changed: src/common/rng.py (keyed draws); src/services/{leave_request_service,expense_service,leave_balance_service,
+leave_batch,expense_batch,leave_detectors,lifecycle}.py; src/repositories/{base,leave_repository,expense_repository}.py;
+src/reference/oracle.py (timing, legacy marker, budget release time); src/data/{dataset,generate}.py;
+src/data/stages/{balances,ground_truth,workbench}.py; src/evaluation/{leave,expense}_service_vs_oracle.py;
+config/generation.yaml (decisions); tests/unit/{leave_world,test_leave_balance,test_leave_validation}.py;
+tests/data/{test_anomalies_and_ground_truth,test_generator_baseline}.py; tests/reference/test_reference_oracle.py;
+docs/05, 06, 07, 09 (section 12), 10, 11, 15; pyproject.toml (0.7.0); data/manifest.json, data/ground_truth/*.
+No migration, no new packages.
+
+Commands:
+    python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+    python -m src.validation
+    python -m src.evaluation.leave_service_vs_oracle
+    python -m src.evaluation.expense_service_vs_oracle
+    .\scripts\reproducibility_check.ps1
+    pytest -q
+
+REAL results (2026-10-28):
+- Generate --load: exit 0; every table count in lea_dev = generated (leave_request 800, expense_claim 1000,
+  leave_balance_transaction 15514, cost_center_transaction 1042, approval_step 2548, approval_event 5044,
+  approval_attempt 2551, request_status_event 6949, request_exception 131, idempotency_record 2551); ground_truth
+  1800 / 1057 / 40 / 41. Volumes 400 / 6 / 800 / 1,000 unchanged; every scenario count unchanged.
+- Validation: 21 checks, 0 failed, 2 not applicable (reimbursement, Phase 8); M1 0/48168, M2 0/79269, M3 6958/6958.
+- Leave comparison: 800 (DRAFT 8, LEGACY 24, SUBMITTED 768): AGREE 800, DISAGREE 0; at as-of APPROVED 755,
+  PENDING_APPROVAL 12, ESCALATED 5, REJECTED 12, RETURNED 8, DRAFT 8 (services = oracle = dataset).
+- Expense comparison: 1000: AGREE 1000, DISAGREE 0; at as-of APPROVED 893, PENDING_APPROVAL 20, ESCALATED 19,
+  REJECTED 27, RETURNED 33, DRAFT 8.
+- Fingerprint 56cfaf0cbaae06426b21e11da3284f2786a208530806bdcfc0c3422d865ddc6a (was 0a84321b...). Against Phase 7A:
+  35 files identical (incl. detections.csv), 19 changed (leave_request marker and outcomes, claims, lines, ledger,
+  balances, budgets, ground truth at as-of, seed.sql, validation report), 14 new (7 workflow tables).
+- reproducibility_check.ps1: 68 files, 68 identical, RESULT: REPRODUCIBLE.
+- pytest -q: 463 passed in 56.88s (433 + 30 new). ruff --select F,E9 src tests migrations: All checks passed.
+Debugging: (1) steps_match DISAGREE on every routed record: in-memory stores kept the submission result's step dicts,
+which later decisions mutated; fix: stores keep copies. (2) a unit test mutated the shared RULES list (EXPIRED_RULE
+leaked into later tests); fix: the test gives its router its own list. (3) generator baseline / oracle tests expected
+eventual statuses; now final_status is at as-of and eventual_status is checked.
+
+S19 plan (NOT applied; waiting for the owner's OK):
+- Change: S1 keeps the drawn organisation, then promotes one person per country without a G7 (US, GB): the
+  lowest-id ACTIVE G6 of that country employed through the window becomes G7 (job title "Chief Financial Officer"),
+  manager_id NULL (top of chain), keeps its department and reports. No new RNG draws, no new stream.
+  S19-L / S19-E plants (4 + 4) are spread over the three G7s; L5 = the G7 of the requester's country.
+- Stays: seed, stream order, volumes 400 / 6 / 800 / 1,000, policies, rules, calendars, every scenario count, the
+  IN G7 (EMP-000314) and its Finance headship; leave and expense draws (S3 / S4 guards do not route).
+- Expected effect (estimate): 2 employee rows change (grade G6 -> G7, manager NULL); routes change for the
+  promoted people's reports (L2 becomes the promoted G7, one step L1+L2 when it is L1) and for US / GB claims above
+  5,000 USD (L5); S19 records move; S6 outcomes and ground truth follow. Fingerprint changes; employee, leave,
+  expense, workflow and ground-truth files change; master tables other than employee stay identical.
+- Alternative: add two G7 slots in S1 (shifts the employees stream: nearly every file changes).
+
+Open issues: S19 OK; AMB-P7B-01..09 (docs/09 12.3); JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
+
+Acceptance criteria after Phase 7B: 1-8, 13, 17, 21 MET; 9 approval routing MET for routing and decisions (agreed
+with the oracle at as-of on every record); 10 self-approval MET at service and DB level (guard + trigger, V-WF-02);
+16 audit history PARTIAL (status events, attempts, approval events append-only; audit_event in Phase 8); 12, 18, 22
+PARTIAL; 11, 14, 15, 19, 20 PARTIAL or NOT STARTED.
 
 ## Phase 7A record
 
@@ -64,7 +140,8 @@ Commands:
     python -m src.validation
     python -m src.evaluation.expense_service_vs_oracle
     python -m src.evaluation.leave_service_vs_oracle
-    .\scriptseproducibility_check.ps1
+    .\scripts
+eproducibility_check.ps1
     pytest -q
 
 REAL results (2026-10-28):

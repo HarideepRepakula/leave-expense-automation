@@ -31,6 +31,7 @@ REQUEST_TRANSITIONS: dict[tuple[str, str], tuple[str, str]] = {
     (S.ESCALATED_FOR_REVIEW, S.RETURNED_FOR_CORRECTION): ("process owner returns", PROCESS_OWNER),
 }
 TERMINAL = frozenset({S.APPROVED.value, S.REJECTED.value, S.CANCELLED.value})
+MAX_ROUNDS = 3   # ASM-025: a request returned in its third round stays RETURNED_FOR_CORRECTION
 
 
 class IllegalTransition(Exception):
@@ -42,3 +43,14 @@ def check_transition(current: str, new: str) -> tuple[str, str]:
         return REQUEST_TRANSITIONS[(S(current), S(new))]
     except (KeyError, ValueError):
         raise IllegalTransition(f"{current} -> {new} is not a legal request transition") from None
+
+
+def check_resubmission(r: dict, actor_id: str | None) -> None:
+    """docs/06 8.3 step 2: only the requester, only from RETURNED_FOR_CORRECTION, at most MAX_ROUNDS rounds."""
+    check_transition(r["workflow_status"], S.SUBMITTED.value)
+    if r["workflow_status"] != S.RETURNED_FOR_CORRECTION:
+        raise IllegalTransition(f"{r['workflow_status']} -> SUBMITTED is a submission, not a resubmission")
+    if actor_id is not None and actor_id != r["employee_id"]:
+        raise IllegalTransition("only the requester may resubmit")
+    if r["current_round"] >= MAX_ROUNDS:
+        raise IllegalTransition(f"round {r['current_round']} is the last allowed round (maximum {MAX_ROUNDS})")

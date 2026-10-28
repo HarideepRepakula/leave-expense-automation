@@ -205,7 +205,7 @@ GTL-000203,S26,EXPENSE,EXP-2025-000477,CURRENCY_MISMATCH,planted S26,DETECT,RETU
 GTL-000204,S26,EXPENSE,EXP-2026-000002,CURRENCY_MISMATCH,planted S26,DETECT,RETURNED_FOR_CORRECTION (CORRECTABLE),line 3 currency changed from GBP to INR,true
 GTL-000205,NATURAL,EXPENSE,EXP-2025-000222,SPLIT_CLAIM_SUSPECTED,naturally occurring,DETECT,Expected outcome APPROVED (reference oracle),natural consequence,false
 GTL-000206,NATURAL,EXPENSE,EXP-2025-000225,SPLIT_CLAIM_SUSPECTED,naturally occurring,DETECT,Expected outcome REJECTED (reference oracle),natural consequence,false
-GTL-000207,NATURAL,EXPENSE,EXP-2026-000464,BUDGET_EXCEEDED,naturally occurring,DETECT,Expected outcome APPROVED (reference oracle),natural consequence,false
+GTL-000207,NATURAL,EXPENSE,EXP-2026-000464,BUDGET_EXCEEDED,naturally occurring,DETECT,Expected outcome ESCALATED_FOR_REVIEW (reference oracle),natural consequence,false
 GTL-000208,S04,LEAVE,LVE-2025-000038,WEEKEND_HOLIDAY_SPAN,naturally occurring control,NOT_DETECT,Quantity excludes weekend and holiday dates; routes normally (not an anomaly),natural: spans a public holiday,false
 GTL-000209,S04,LEAVE,LVE-2025-000047,WEEKEND_HOLIDAY_SPAN,naturally occurring control,NOT_DETECT,Quantity excludes weekend and holiday dates; routes normally (not an anomaly),natural: spans a public holiday,false
 GTL-000210,S04,LEAVE,LVE-2025-000069,WEEKEND_HOLIDAY_SPAN,naturally occurring control,NOT_DETECT,Quantity excludes weekend and holiday dates; routes normally (not an anomaly),natural: spans a public holiday,false

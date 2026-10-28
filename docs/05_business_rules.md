@@ -136,6 +136,8 @@ Every approve/reject/return action writes an approval_attempt first. Outcome ACC
 | an earlier sequence step is still PENDING | LEVEL_SKIPPED |
 | same (step_id, actor, action, idempotency key) already accepted | DUPLICATE_ACTION |
 
+Guard order (ASM-P7B-01): SELF_APPROVAL, UNAUTHORIZED_APPROVER, DUPLICATE_ACTION, STEP_NOT_PENDING, LEVEL_SKIPPED, EXPIRED_RULE. Implemented in src/services/approval_service.py (Phase 7B); a process-owner decision on an escalated request writes an attempt with approval_step_id NULL.
+
 Decision outcomes: APPROVED on last step -> request APPROVED (expense: reimbursement created ELIGIBLE in the same transaction, docs/06). REJECTED at any step -> request REJECTED; later steps SKIPPED. RETURN -> request RETURNED_FOR_CORRECTION; all PENDING steps CANCELLED.
 
 ## 6. Budget calculations (AM-B11)
@@ -208,7 +210,7 @@ For data generation only, approver behaviour is a function of the request state:
 | CORRECTABLE (RETURNED) | requester resubmits with the issue fixed in 50% of cases after a seeded delay; otherwise stays RETURNED (ASM-025) |
 | decision date > AS_OF_DATE | remains PENDING_APPROVAL / ESCALATED |
 
-Delays are the only stochastic element and come from the "delays" RNG stream.
+Delays are the only stochastic element and come from the "delays" RNG stream. Timing (Phase 7B, ASM-P7B-02): decided at 17:00 UTC on the max(1, delay)-th business day of the decider's country after the assignment day (from the next day when assigned at or after 17:00), so a decision is always more than 24 hours after its assignment; decisions after the as-of instant do not happen.
 
 ## 10. Human-readable reasons (spec 13.4)
 

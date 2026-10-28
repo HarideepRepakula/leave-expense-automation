@@ -14,8 +14,13 @@ claim is routed on its primary category and USD total as of the submission date;
 RULE_CONFLICT join the codes (SOFT -> ESCALATED_FOR_REVIEW, the reservation is kept). Approval steps are created only
 for an outcome of PENDING_APPROVAL. A store without a router (the generator guard) does no routing, as in Phase 6.
 
-Not here, by phase: decisions and resubmission (Phase 7B); approved_amount is computed (BR-EX-14) but stored only
-on approval (Phase 7B); reimbursement (Phase 8); audit_event rows and idempotency records (Phase 8).
+Resubmission (Phase 7B, docs/06 8.3): submit_expense() on a RETURNED_FOR_CORRECTION claim opens round + 1. The
+corrected lines are inserted tagged with the new round, line numbers continuing (DEC-11); the old lines stay; the
+total is recomputed over the new round's lines; a new RESERVATION is posted. Without new lines the current round's
+lines are carried into the new round unchanged (ASM-P7B-07). The claim id never changes.
+Decisions (approval_service): approved_amount (BR-EX-14) is stored at final approval from the stored line results
+(approved_amount_of); RELEASE of the open reservation on reject or return (BR-BUD-04); OVERRIDE when a process owner
+sends on a BUDGET_EXCEEDED claim (BR-BUD-06). Not here: reimbursement (Phase 8); audit_event rows (Phase 8).
 """
 from __future__ import annotations
 
@@ -25,11 +30,14 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Protocol
 
+from src.common import ids
 from src.common.enums import BudgetTxnType, LineValidationResult, ReceiptStatus, RequestType, WorkflowStatus
 from src.common.money import fx_rate_on
 from src.services.approval_routing import ApprovalRouter, Routing, assignment_event, build_steps
+from src.services.approval_service import BUDGET_OVERRIDE, DecisionResult, IdempotentReplay, InMemoryWorkflow, \
+    resubmission_key, resubmission_record
 from src.services.exception_service import Classification, ExceptionCatalogue, Finding, FindingSet
-from src.services.lifecycle import IllegalTransition, check_transition
+from src.services.lifecycle import check_resubmission, check_transition
 
 ZERO = Decimal("0")
 CENT = Decimal("0.01")
@@ -38,6 +46,9 @@ RELEASED = frozenset({WorkflowStatus.REJECTED.value, WorkflowStatus.RETURNED_FOR
 # A line that carries one of these cannot be paid as it stands (ASM-P6-04); LINE_LIMIT_EXCEEDED only caps it.
 LINE_FAIL_CODES = frozenset({"EXPENSE_OUTSIDE_EMPLOYMENT", "EXPENSE_DATE_TOO_OLD", "CURRENCY_MISMATCH",
                              "POLICY_NOT_APPLICABLE", "MISSING_RECEIPT"})
+RESUBMIT_CLAIM_FIELDS = frozenset({"cost_center_id", "currency", "claim_period_start", "claim_period_end"})
+LINE_INPUT_FIELDS = ("category", "merchant_description", "expense_date", "quantity", "unit_amount", "line_amount",
+                     "currency", "receipt_id")
 
 
 class ExpenseInputError(ValueError):
@@ -119,6 +130,65 @@ def split_groups(items: list[tuple], window_days: int, threshold_usd: Decimal) -
             groups.append([it[2] for it in members])
             assigned.update(it[2] for it in members)
     return groups
+
+
+def approved_amount_of(lines: list[dict], policies: list[dict]) -> Decimal:
+    """BR-EX-14 at approval, from the stored line results of the current round (ASM-P6-04): SUM(min(line,
+    per-line limit)) over the lines that are not FAIL."""
+    limits = {p["expense_policy_id"]: p["per_line_limit"] for p in policies}
+    return money(sum((min(ln["line_amount"], limits[ln["expense_policy_id"]]) for ln in lines
+                      if ln["validation_result"] != LineValidationResult.FAIL.value), ZERO))
+
+
+def open_reservations(claim_id: str, ledger: list[dict]) -> dict[str, tuple[str, Decimal]]:
+    """Budget id -> (cost center, RESERVATION - RELEASE - ACTUAL) of one claim, where still positive."""
+    out: dict[str, tuple[str, Decimal]] = {}
+    for t in ledger:
+        if t["expense_claim_id"] != claim_id or t["txn_type"] == BudgetTxnType.OVERRIDE.value:
+            continue
+        sign = 1 if t["txn_type"] == BudgetTxnType.RESERVATION.value else -1
+        cc, amount = out.get(t["cost_center_budget_id"], (t["cost_center_id"], ZERO))
+        out[t["cost_center_budget_id"]] = (cc, amount + sign * t["amount"])
+    return {b: v for b, v in sorted(out.items()) if v[1] > 0}
+
+
+def release_postings(claim: dict, ledger: list[dict], at: datetime, reason: str) -> list[dict]:
+    """BR-BUD-04: RELEASE whatever the claim still holds (REJECTED, RETURNED_FOR_CORRECTION, CANCELLED)."""
+    return [{"cost_center_id": cc, "cost_center_budget_id": b, "expense_claim_id": claim["expense_claim_id"],
+             "txn_type": BudgetTxnType.RELEASE.value, "amount": amount, "currency": claim["currency"],
+             "txn_date": at.date(), "posted_at": at, "reason_code": reason}
+            for b, (cc, amount) in open_reservations(claim["expense_claim_id"], ledger).items()]
+
+
+def override_postings(claim: dict, ledger: list[dict], at: datetime) -> list[dict]:
+    """BR-BUD-06: an OVERRIDE row (the claim total, reason BUDGET_OVERRIDE) recording that a BUDGET_EXCEEDED claim
+    was sent on knowingly. It does not change available or committed (BR-BUD-01 counts only RESERVATION, RELEASE
+    and ACTUAL)."""
+    return [{"cost_center_id": cc, "cost_center_budget_id": b, "expense_claim_id": claim["expense_claim_id"],
+             "txn_type": BudgetTxnType.OVERRIDE.value, "amount": claim["total_amount"], "currency": claim["currency"],
+             "txn_date": at.date(), "posted_at": at, "reason_code": BUDGET_OVERRIDE}
+            for b, (cc, _) in open_reservations(claim["expense_claim_id"], ledger).items()]
+
+
+def round_lines(claim: dict, previous: list[dict], new_lines: list[dict] | None, new_round: int) -> list[dict]:
+    """docs/06 8.3 step 4: the new round's lines, numbered after every existing line (DEC-11). Without new lines the
+    current round's lines are carried over unchanged (ASM-P7B-07)."""
+    source = new_lines if new_lines is not None else [
+        {k: ln[k] for k in LINE_INPUT_FIELDS} for ln in current_lines(claim, previous)]
+    if not source:
+        raise ExpenseInputError(f"{claim['expense_claim_id']}: a claim needs at least one line")
+    start = max((ln["line_number"] for ln in previous), default=0)
+    out = []
+    for i, ln in enumerate(source, start=start + 1):
+        unknown = set(ln) - set(LINE_INPUT_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown line fields {sorted(unknown)}")
+        out.append({**{k: ln.get(k) for k in LINE_INPUT_FIELDS},
+                    "expense_line_id": ids.expense_line_id(claim["expense_claim_id"], i),
+                    "expense_claim_id": claim["expense_claim_id"], "line_number": i, "submission_round": new_round,
+                    "expense_policy_id": None, "validation_result": LineValidationResult.PENDING.value,
+                    "validation_detail": None})
+    return out
 
 
 def budget_available(budget: dict, ledger: list[dict]) -> Decimal:
@@ -298,6 +368,8 @@ class ExpenseSubmissionResult:
     budget_postings: list[dict]     # RESERVATION (+ RELEASE when rejected/returned), unnumbered
     routing: Routing | None = None  # None when not routed (rejected/returned, or a store without a router)
     steps: list[dict] = field(default_factory=list)   # approval_step rows (PENDING_APPROVAL only)
+    changes: dict = field(default_factory=dict)       # resubmission: corrected claim columns and current_round
+    idempotency: dict | None = None                   # resubmission: the completed idempotency_record
 
     @property
     def status(self) -> str:
@@ -324,6 +396,12 @@ class ExpenseStore(Protocol):
 
     def record_submission(self, result: ExpenseSubmissionResult) -> None: ...
 
+    def idempotency(self, actor_id: str, key: str) -> dict | None: ...
+
+    def all_lines(self, claim_id: str) -> list[dict]: ...
+
+    def add_round_lines(self, claim: dict, lines: list[dict]) -> None: ...
+
 
 def budget_postings(claim: dict, v: ExpenseValidation, budget: dict | None, status: str) -> list[dict]:
     """BR-BUD-02/04: RESERVATION of the total on submission; RELEASE in the same transaction when the outcome
@@ -340,13 +418,31 @@ def budget_postings(claim: dict, v: ExpenseValidation, budget: dict | None, stat
 
 
 def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatalogue, at: datetime,
-                   actor_id: str | None, correlation_id: uuid.UUID) -> ExpenseSubmissionResult:
-    """docs/06 8.1 steps 2-5 and 7 for expense claims, in one store transaction."""
-    claim = store.load_claim(claim_id)
-    if claim["workflow_status"] != WorkflowStatus.DRAFT.value:
-        check_transition(claim["workflow_status"], WorkflowStatus.SUBMITTED.value)
-        raise IllegalTransition(f"{claim_id}: resubmission ({claim['workflow_status']} -> SUBMITTED) arrives in "
-                                f"Phase 7")
+                   actor_id: str | None, correlation_id: uuid.UUID, changes: dict | None = None,
+                   new_lines: list[dict] | None = None, idempotency_key: str | None = None) -> ExpenseSubmissionResult:
+    """docs/06 8.1 steps 2-5 and 7 for expense claims, in one store transaction. On a RETURNED_FOR_CORRECTION claim
+    it is the resubmission of docs/06 8.3 (round + 1, `changes` to RESUBMIT_CLAIM_FIELDS, `new_lines`)."""
+    stored = store.load_claim(claim_id)
+    first = stored["workflow_status"]
+    key, body, claim = None, None, stored
+    if first == WorkflowStatus.DRAFT.value:
+        if changes or new_lines is not None:
+            raise ValueError("changes and new lines apply to a resubmission only")
+    else:
+        unknown = set(changes or {}) - RESUBMIT_CLAIM_FIELDS
+        if unknown:
+            raise ValueError(f"fields that cannot change on resubmission: {sorted(unknown)}")
+        key = idempotency_key or resubmission_key(actor_id, claim_id, stored["current_round"] + 1)
+        known = store.idempotency(actor_id, key)
+        if known is not None:
+            raise IdempotentReplay(known)
+        check_resubmission(stored, actor_id)
+        body = {"request": claim_id, "changes": changes or {}, "lines": new_lines}
+        lines = round_lines({**stored, **(changes or {})}, store.all_lines(claim_id), new_lines,
+                            stored["current_round"] + 1)
+        claim = {**stored, **(changes or {}), "current_round": stored["current_round"] + 1,
+                 "total_amount": sum((ln["line_amount"] for ln in lines), ZERO)}
+        store.add_round_lines(claim, lines)
     ctx = store.context(claim, at.date())
     v = validate_claim(claim, ctx, at)
     router = store.router()
@@ -355,8 +451,7 @@ def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatal
         routing = router.route(RequestType.EXPENSE.value, claim["employee_id"], v.primary_category, v.usd, at.date())
     codes = v.codes + [f.code for f in (routing.findings if routing else [])]
     c = catalogue.classify(codes)
-    path = [WorkflowStatus.DRAFT.value, WorkflowStatus.SUBMITTED.value, WorkflowStatus.VALIDATING.value,
-            c.status_after_validation]
+    path = [first, WorkflowStatus.SUBMITTED.value, WorkflowStatus.VALIDATING.value, c.status_after_validation]
     events = []
     for prev, new in zip(path, path[1:]):
         check_transition(prev, new)
@@ -371,6 +466,13 @@ def submit_expense(store: ExpenseStore, claim_id: str, catalogue: ExceptionCatal
                             store.next_step_sequence(claim_id))
     result = ExpenseSubmissionResult(claim_id, claim["current_round"], at, actor_id, correlation_id, v, c, events,
                                      budget_postings(claim, v, ctx.budget, c.status_after_validation), routing, steps)
+    for posting in result.budget_postings:
+        posting["posted_at"] = at
+    if key is not None:
+        result.changes = {**(changes or {}), "current_round": claim["current_round"],
+                          "total_amount": claim["total_amount"]}
+        result.idempotency = resubmission_record(actor_id, RequestType.EXPENSE.value, claim_id, key, body, at,
+                                                 c.status_after_validation)
     store.record_submission(result)
     return result
 
@@ -390,8 +492,10 @@ def apply_to_claim(claim: dict, lines: list[dict], result: ExpenseSubmissionResu
     """The column updates of a submission, shared by both stores. A stored expense_policy_id is kept (it is the
     version the claim referenced, checked by BR-EX-03); otherwise the primary category's version is stored."""
     v, c = result.validation, result.classification
+    claim.update(result.changes)
     claim.update(workflow_status=c.status_after_validation, exception_class=c.exception_class,
-                 decision_reason_code=c.decision_reason_code, first_submitted_at=result.submitted_at,
+                 decision_reason_code=c.decision_reason_code,
+                 first_submitted_at=claim["first_submitted_at"] or result.submitted_at,
                  expense_policy_id=claim["expense_policy_id"] or v.policy_id, total_amount_usd=v.usd,
                  fx_rate_used=v.rate, receipt_status=v.receipt_status)
     by_id = {r.expense_line_id: r for r in v.lines}
@@ -403,12 +507,15 @@ def apply_to_claim(claim: dict, lines: list[dict], result: ExpenseSubmissionResu
 
 
 # --- in-memory store -------------------------------------------------------------------------------------------
-class InMemoryExpenseStore:
-    """An ExpenseStore over plain rows (generator guard, replay, unit tests). Same contract as the DB store."""
+class InMemoryExpenseStore(InMemoryWorkflow):
+    """An ExpenseStore and WorkflowStore over plain rows (generator guard, S6 simulation, unit tests). Same contract
+    as the DB store. `roles`: employee id -> role names (process-owner decisions)."""
+
+    request_type = RequestType.EXPENSE.value
 
     def __init__(self, employees: dict[str, dict], policies: list[dict], fx: list[dict], cost_centers: list[dict],
                  budgets: list[dict], receipts: list[dict], budget_ledger: list[dict], params: DetectionParams,
-                 router: ApprovalRouter | None = None) -> None:
+                 router: ApprovalRouter | None = None, roles: dict[str, set[str]] | None = None) -> None:
         self.employees, self.policies, self.fx, self.params, self._router = employees, policies, fx, params, router
         self.cost_centers = {c["cost_center_id"]: c for c in cost_centers}
         self.budgets = budgets
@@ -423,9 +530,38 @@ class InMemoryExpenseStore:
         self.exceptions: list[dict] = []
         self.steps: dict[str, list[dict]] = {}
         self.approval_events: list[dict] = []
+        self.init_workflow(roles)
 
     def router(self) -> ApprovalRouter | None:
         return self._router
+
+    def load_request(self, request_id: str) -> dict:
+        return self.claims[request_id]
+
+    def all_lines(self, claim_id: str) -> list[dict]:
+        return self.lines[claim_id]
+
+    def add_round_lines(self, claim: dict, lines: list[dict]) -> None:
+        self.lines[claim["expense_claim_id"]].extend(dict(ln) for ln in lines)
+
+    # WorkflowStore (approval_service) -----------------------------------------------------------------------
+    def routing_inputs(self, r: dict) -> tuple[str, Decimal, date]:
+        """Primary category, USD total and the round's submission date (ASM-P7A-01)."""
+        res = self.results[r["expense_claim_id"]]
+        return res.validation.primary_category, res.validation.usd, res.submitted_at.date()
+
+    def approval_effects(self, r: dict, at: datetime) -> tuple[dict, list[dict]]:
+        lines = current_lines(r, self.lines[r["expense_claim_id"]])
+        return {"approved_amount": approved_amount_of(lines, self.policies)}, []
+
+    def release_postings(self, r: dict, at: datetime, reason: str) -> list[dict]:
+        return release_postings(r, self.budget_ledger, at, reason)
+
+    def override_postings(self, r: dict, at: datetime) -> list[dict]:
+        return override_postings(r, self.budget_ledger, at)
+
+    def post_decision_rows(self, res: DecisionResult) -> None:
+        self.budget_ledger.extend(res.budget_postings)
 
     def next_step_sequence(self, claim_id: str) -> int:
         return len(self.steps.get(claim_id, [])) + 1
@@ -478,6 +614,8 @@ class InMemoryExpenseStore:
         apply_to_claim(claim, self.lines[cid], result)
         self.results[cid] = result
         self.budget_ledger.extend(result.budget_postings)
+        if result.idempotency is not None:
+            self.record_idempotency(result.idempotency)
         for h in claim_hashes(current_lines(claim, self.lines[cid]), self.receipts):
             self.by_hash.setdefault(h, set()).add(cid)
         for e in result.events:
@@ -488,5 +626,5 @@ class InMemoryExpenseStore:
                                     "exception_code": f.code, "detail": f.detail, "detected_at": result.submitted_at,
                                     "detected_by": "SUBMISSION", "correlation_id": result.correlation_id})
         if result.steps:
-            self.steps.setdefault(cid, []).extend(result.steps)
+            self.steps.setdefault(cid, []).extend(dict(s) for s in result.steps)
             self.approval_events.append(assignment_event(result.steps[0], result.correlation_id))

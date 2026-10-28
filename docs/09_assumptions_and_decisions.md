@@ -361,7 +361,7 @@ Original proposals:
 | AMB-P6-04 | DEC-01 for S5 expense edits: the S5 constructions keep their own helpers (lines_fit, split_safe); every result is then checked by the oracle (DEC-P4-02) and by the services-vs-oracle comparison (0 disagreements, tested). Rebuilding each S5 edit guard on the services, as done for leave, would change the expense dataset. | Keep the S5 expense helpers; S4 uses the services. |
 | AMB-P6-05 | Cross-claim checks against earlier claims of any outcome, or only claims still holding. | Any outcome (ASM-P6-06), same as the oracle. |
 
-## 11. Phase 7A additions (routing and approval steps), awaiting approval
+## 11. Phase 7A additions (routing and approval steps), APPROVED 2026-10-28 (AMB-P7A-01..04, DEC-P7A-02 and DEC-P7A-04 accepted)
 
 ### 11.1 Assumptions (ASSUMPTION, illustrative synthetic)
 
@@ -391,3 +391,47 @@ Original proposals:
 | AMB-P7A-02 | Escalated requests (SOFT) are routed but have no steps yet. | The route is recorded in calculated_values; steps are created when the process owner sends the request on (7B). |
 | AMB-P7A-03 | A delegation whose delegate is the requester: substitution moves the requester up to the delegator, who was already visited. | Level unresolved -> NO_VALID_APPROVAL_PATH (same as the oracle). Alternative: continue with the delegator's manager (needs an oracle change too). |
 | AMB-P7A-04 | Writing approval_event ASSIGNED now (Phase 7A) or with the audit work (Phase 8). | Now, for step 1 only (DEC-P7A-06). |
+
+## 12. Phase 7B additions (decisions, resubmission, process owner, S6 timing, carry-forward), awaiting approval
+
+### 12.1 Assumptions (ASSUMPTION, illustrative synthetic; values in config/*.yaml)
+
+| ID | Assumption |
+|---|---|
+| ASM-P7B-01 | Guard order at decision time: SELF_APPROVAL, UNAUTHORIZED_APPROVER, DUPLICATE_ACTION, STEP_NOT_PENDING, LEVEL_SKIPPED, EXPIRED_RULE; the first failing guard blocks. docs/05 5.5 lists the guards without an order; DUPLICATE_ACTION comes before STEP_NOT_PENDING so that it can occur at all (an accepted step is no longer pending). |
+| ASM-P7B-02 | Decision timing (stage S6, config/generation.yaml decisions): a decision is made at 17:00 UTC on the max(1, delay)-th business day of the deciding person's country after the assignment day; an assignment at or after 17:00 counts from the next day, so every decision is more than 24 hours after its assignment. Delay = keyed draw on the delays stream, key (request id, round, level or PROCESS_OWNER), ranges ASM-024. The as-of instant is midnight UTC at the start of AS_OF_DATE (FrozenClock); a decision after it has not happened. |
+| ASM-P7B-03 | Reasons: a reject or return without a reason gives the request decision_reason_code APPROVER_REJECTED / APPROVER_RETURNED. A returning step becomes CANCELLED (decision_at stays NULL, DB CHECK decided_has_timestamp) with an approval_event RETURNED; later pending steps CANCELLED (return) or SKIPPED (reject). A process owner's send-on writes reason PROCESS_OWNER_ACCEPTED, or BUDGET_OVERRIDE when BUDGET_EXCEEDED is among the round's codes, on the status event; the request's decision_reason_code is NULL while PENDING_APPROVAL (ASM-P5-08). In the simulation a process-owner reject or return gives the deciding code (catalogue order). |
+| ASM-P7B-04 | "Holds a higher level in the same chain" (docs/05 5.1): for an L1-L3 step, any manager above the step's original approver (delegated_from, else approver); for an L4 step, the requester's L5; for L5 nobody else. |
+| ASM-P7B-05 | Year-end carry-forward (BR-LBAL-04), posted at 00:00 UTC on 1 January: CARRY_FORWARD = the previous year's balance at Dec 31 (posted rows plus its full accrual schedule) minus that year's reservations still open then (treated as if approved, as ASM-P5-03 did), and CARRY_FORWARD_EXPIRY = minus the part above the cap; both in the new year's balance, dated 1 January. A negative balance carries only when the policy permits negatives; nothing is posted for zero. The recompute of ASM-P5-03 is removed: without these rows nothing is carried. |
+| ASM-P7B-06 | The dataset contains no resubmissions and no cancellations: a request RETURNED_FOR_CORRECTION at as-of stays so (the resubmission service exists and is tested). See AMB-P7B-02. |
+| ASM-P7B-07 | An expense resubmission without new lines carries the current round's lines into the new round unchanged (new line numbers, DEC-11). |
+| ASM-P7B-08 | In the simulation the process owner who decides is the lowest employee id holding PROCESS_OWNER who is not the requester; the L4 path of docs/05 9.4 is available in the service but not used by the simulation. |
+| ASM-P7B-09 | NEGATIVE_BALANCE_UNPERMITTED examines only USAGE that never passed the submission balance check (legacy approvals). A request approved through the workflow was checked at submission against every open reservation, and approval only turns its reservation into usage. |
+| ASM-P7B-10 | A process owner's send-on creates steps from the route at the round's submission date (AMB-P7A-02). An approver whose employment ends between assignment and decision still decides in the simulation (no re-routing). See AMB-P7B-06. |
+
+### 12.2 Decisions
+
+| ID | Decision | Alternatives considered |
+|---|---|---|
+| DEC-P7B-01 | src/services/approval_service.py holds decide_step and decide_escalated over a WorkflowStore protocol; request-type rules stay in leave_request_service (approval_postings) and expense_service (approved_amount_of, release_postings, override_postings). Four stores implement it: the two in-memory stores (shared InMemoryWorkflow) and the two PostgreSQL stores (shared SqlWorkflow in src/repositories/base.py). No src/reference import. | One service per request type. |
+| DEC-P7B-02 | Legacy approvals carry decision_reason_code LEGACY_APPROVAL (set by S5, a raw input). The replays and the oracle read the raw-input view: DRAFT, legacy APPROVED, everything else a submission at created_at, whatever status S6 wrote. S6 writes only outputs, so the comparisons can run on the exported dataset. | Detect legacy rows by the absence of status events (an engine output). |
+| DEC-P7B-03 | Stage S6 = the replays with routing and a DecisionTiming (DEC-01). It writes workflow_status, exception_class, decision_reason_code, the submission outputs and approved_amount, and seven tables that were empty before: cost_center_transaction, approval_step, approval_event, approval_attempt, request_status_event, request_exception, idempotency_record; the leave ledger is renumbered with USAGE and year-end rows and the snapshots recomputed. Ids follow time. detections.csv comes from the S6 replays (byte-identical to Phase 7A). | Keep the dataset at SUBMITTED. |
+| DEC-P7B-04 | The oracle has its own timing model (numpy keyed draws re-implemented, same rule as ASM-P7B-02, process owner from user_role): final_status is the status at as-of, eventual_status keeps the eventual outcome. A claim's reservation is released at the process owner's reject or return instant for claims submitted at or after it. | Eventual outcome only (cannot check timing). |
+| DEC-P7B-05 | expected_approved_amount and expected_reimbursement_eligibility follow the status at as-of: set only for claims APPROVED at as-of. | Eventual values. |
+| DEC-P7B-06 | Not in 7B: reimbursement rows at final approval and reimbursement_attempt (Phase 8), audit_event rows (Phase 8), the ESCALATE action of a step approver, cancellation, attempt scenarios S11/S12/S18 in the dataset, the S19 dataset change (waiting for owner OK). | |
+| DEC-P7B-07 | Both comparisons also compare the status at as-of: services' S6 simulation = oracle = dataset, and the approved amount stored at approval. Seed and as-of come from data/manifest.json. | |
+| DEC-P7B-08 | A blocked attempt completes its idempotency key (docs/06 8.2 step 5); the same derived key with a different body raises IdempotencyConflict, so a retry after a block needs a new client key. | Let a blocked key be reused. |
+
+### 12.3 Ambiguities found in Phase 7B (default APPLIED unless stated; please confirm or change)
+
+| ID | Ambiguity | Default |
+|---|---|---|
+| AMB-P7B-01 | The proposed S22 rule ("17:00 on a business day at least one business day after assignment") still allows a decision 23 hours after an 18:00 assignment, which could decide an S22 partner first. | Count from the next day when assigned at or after 17:00 (ASM-P7B-02): every decision is more than 24 hours after assignment. Applied. |
+| AMB-P7B-02 | ASM-025 (50 percent of returned requests resubmitted) and ASM-040 (about 2 percent cancelled) in the dataset. | Not simulated in 7B (ASM-P7B-06); proposed for Phase 8 together with S18 (repeated submission). Applied. |
+| AMB-P7B-03 | S11 / S12 (self-approval and unauthorised attempt rows) could be planted now that attempts exist. | Plant in Phase 8 with S13 / S18 (scenario actual_count stays NULL). Applied. |
+| AMB-P7B-04 | docs/06 8.2 creates the reimbursement in the final-approval transaction, but reimbursement is Phase 8. | Phase 8; approved claims carry approved_amount now, no reimbursement row yet. Applied. |
+| AMB-P7B-05 | Who decides escalations in the simulation. | ASM-P7B-08. Applied. |
+| AMB-P7B-06 | Approver's employment ends after assignment, before the decision. | The assigned approver still decides (ASM-P7B-10). Alternative: escalate (docs/06 2.2 PENDING -> ESCALATED, system). Applied. |
+| AMB-P7B-07 | expected_approved_amount / eligibility at as-of or eventual. | At as-of (DEC-P7B-05). Applied. |
+| AMB-P7B-08 | Form of the year-end rows: full balance plus a negative expiry, or the capped amount only. | Full balance + expiry, both visible in the ledger (ASM-P7B-05). Applied. |
+| AMB-P7B-09 | S19: one G7 per country. | Plan shown in the Phase 7B report; NOT applied, waiting for the owner's OK. |

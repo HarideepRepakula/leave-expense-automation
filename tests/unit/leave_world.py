@@ -110,7 +110,9 @@ def req(rid: str, emp: str, pol: str, start: date, end: date, sh: bool = False, 
     return {"leave_request_id": rid, "employee_id": emp, "leave_policy_id": pol, "start_date": start,
             "end_date": end, "start_half_day": sh, "end_half_day": eh, "medical_cert_flag": cert,
             "workflow_status": status, "current_round": 1, "created_at": created,
-            "first_submitted_at": None if status == "DRAFT" else created}
+            "first_submitted_at": None if status == "DRAFT" else created,
+            # an APPROVED row in a replay's input is a legacy approval and carries its marker (DEC-P7B-02)
+            "decision_reason_code": "LEGACY_APPROVAL" if status == "APPROVED" else None}
 
 
 def submit(store: InMemoryLeaveStore, r: dict, when: datetime):

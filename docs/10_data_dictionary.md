@@ -601,3 +601,8 @@ Origin REF = written by the ground-truth stage from the planted definitions and 
 ## 10. Cardinality summary
 
 See docs/04 section 2 for the full relationship catalogue. In short: department 1:N employee, cost_center, cost_center_budget; employee 1:N leave_balance, leave_request, expense_claim, delegation (twice), assignment, approval_step (as approver), approval_attempt (as actor); leave_policy 1:N leave_balance, leave_request; leave_balance 1:N leave_balance_transaction; expense_claim 1:N expense_line, cost_center_transaction, 1:0..1 reimbursement; receipt 1:N expense_line; request (leave or expense) 1:N approval_step, request_status_event, request_exception, approval_attempt via exactly-one nullable FKs; approval_step 1:N approval_event; reimbursement 1:N reimbursement_attempt; application_user N:M role via user_role.
+
+## Phase 7B notes
+
+- leave_request.decision_reason_code = LEGACY_APPROVAL marks a legacy approval (S01/S02), a raw input written by stage S5 (DEC-P7B-02). Other values are exception codes (ASM-P5-08) or decision reasons (APPROVER_REJECTED, APPROVER_RETURNED, PROCESS_OWNER_ACCEPTED, BUDGET_OVERRIDE, ASM-P7B-03).
+- Stage S6 (Phase 7B) populates approval_step, approval_event, approval_attempt, request_status_event, request_exception, idempotency_record and cost_center_transaction in the generated dataset; their columns are unchanged.

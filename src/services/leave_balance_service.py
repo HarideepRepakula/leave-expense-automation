@@ -146,31 +146,44 @@ class BalanceBook:
         return sum((r.quantity for r in self.reservations if r.year == year and r.request_id != exclude
                     and (before is None or r.submitted_at < before)), ZERO)
 
-    def carry_in(self, year: int, on: date, before: datetime | None = None) -> Decimal:
-        """Carry-forward into `year` as known on `on`. Zero before Jan 1 of that year (unknown until Dec 31,
-        BR-LBAL-09) and when the employee had no balance the year before. When the year-end CARRY_FORWARD rows
-        are already posted they are part of `posted`. Otherwise it is recomputed (BR-LV-13): the previous year's
-        balance at Dec 31 minus that year's still-open reservations, then BR-LBAL-04 (ASM-P5-03)."""
-        if on < date(year, 1, 1) or (year - 1) not in self.years:
-            return ZERO
-        if any(t["txn_type"] in CARRY_TYPES for t in self.rows.get(year, [])):
-            return ZERO
-        dec31 = date(year - 1, 12, 31)
-        prev = (self.carry_in(year - 1, dec31, before) + self.posted(year - 1, on)
-                + self.accrued(year - 1, dec31) - self.reserved(year - 1, before=before))
-        return carry_forward(prev, self.policy)[0]
-
     def available(self, year: int, on: date, part_start: date | None = None, exclude: str | None = None,
                   before: datetime | None = None) -> Decimal:
         """BR-LBAL-07/09: available_for_validation for one leave year, checked on `on` (the submission date):
-        carry-forward + posted ledger as of `on` + accrual scheduled on or before max(on, part_start) - open
-        reservations of that year. Compare against negative_floor(policy) (BR-LBAL-08). A year without a
-        leave_balance row has nothing available: there is no balance to post usage to (ASM-P5-06)."""
+        posted ledger as of `on` (the CARRY_FORWARD rows dated Jan 1 included, so carry-forward counts only from
+        Jan 1, BR-LBAL-09) + accrual scheduled on or before max(on, part_start) - open reservations of that year.
+        Compare against negative_floor(policy) (BR-LBAL-08). A year without a leave_balance row has nothing
+        available: there is no balance to post usage to (ASM-P5-06). Phase 7B: carry-forward is never recomputed
+        any more; it exists only as the year-end rows of year_end_postings() (replaces ASM-P5-03, AMB-P5-02)."""
         if year not in self.years:
             return ZERO.quantize(ONE_DP)
         upto = on if part_start is None else max(on, part_start)
-        return (self.carry_in(year, on, before) + self.posted(year, on) + self.accrued(year, upto)
-                - self.reserved(year, exclude, before)).quantize(ONE_DP)
+        return (self.posted(year, on) + self.accrued(year, upto) - self.reserved(year, exclude, before)) \
+            .quantize(ONE_DP)
+
+    def year_end_postings(self, year: int, reason: str = "Year-end carry-forward") -> list[dict]:
+        """BR-LBAL-04 at the start of `year` (ASM-P7B-05): the previous year's balance at Dec 31 (posted rows,
+        its own carry-forward included, plus its full accrual schedule) minus the previous year's reservations
+        still open now (treated as if approved, as ASM-P5-03 did). Rows, both dated Jan 1 of `year` in the new
+        year's balance: CARRY_FORWARD = that balance (debt only when the policy permits negatives), and
+        CARRY_FORWARD_EXPIRY = minus the part above the cap. Nothing when either year has no balance or the
+        amount is zero. Unnumbered: the caller assigns LBT ids."""
+        if year not in self.years or (year - 1) not in self.years:
+            return []
+        dec31 = date(year - 1, 12, 31)
+        at_year_end = (self.posted(year - 1, dec31) + self.accrued(year - 1, dec31)
+                       - self.reserved(year - 1)).quantize(ONE_DP)
+        carried, expired = carry_forward(at_year_end, self.policy)
+        brought = carried + expired
+        bal = ids.leave_balance_id(self.employee["employee_id"], self.policy["leave_policy_id"], year)
+        row = {"leave_balance_id": bal, "leave_request_id": None, "txn_date": date(year, 1, 1)}
+        rows = []
+        if brought != 0:
+            rows.append({**row, "txn_type": LeaveTxnType.CARRY_FORWARD.value, "quantity": brought,
+                         "reason": f"{reason} from {year - 1}"})
+        if expired != 0:
+            rows.append({**row, "txn_type": LeaveTxnType.CARRY_FORWARD_EXPIRY.value, "quantity": -expired,
+                         "reason": f"{reason}: above the cap of {self.policy['carry_forward_cap_days']} days"})
+        return rows
 
     def accrual_mismatches(self, on: date) -> list[int]:
         """Years whose posted ACCRUAL rows (dated <= on) differ from the schedule (BR-LV-13 technical check)."""
