@@ -166,6 +166,8 @@ class WorkflowStore(Protocol):
 
     def record_decision(self, result: DecisionResult) -> None: ...
 
+    def record_reassignment(self, request_id: str, step_update: dict, event: dict) -> None: ...
+
 
 @dataclass(frozen=True)
 class ProcessOwnerPolicy:
@@ -356,6 +358,39 @@ def decide_step(store: WorkflowStore, request_id: str, step_id: str, actor_id: s
     return res
 
 
+# --- reassignment (AMB-P7B-11) -----------------------------------------------------------------------------------
+APPROVER_EMPLOYMENT_ENDED = "APPROVER_EMPLOYMENT_ENDED"
+
+
+def reassign_departed(store: WorkflowStore, request_id: str, step_id: str, at: datetime,
+                      correlation_id: uuid.UUID) -> str | None:
+    """AMB-P7B-11: a PENDING step whose approver's employment ended before `at` goes to the person the routing
+    substitution gives on that date (docs/05 5.4: the delegate, else the next person up; never the requester).
+    The step row gets the new approver (and delegated_from when a delegate is used); assigned_at and the original
+    ASSIGNED event stay; a REASSIGNED approval_event (actor NULL = system, comment "old -> new") is appended.
+    Returns the new approver, or None when nothing changes (approver still employed, or nobody can act)."""
+    r = store.load_request(request_id)
+    step = next(s for s in store.steps_of(request_id) if s["approval_step_id"] == step_id)
+    if step["step_status"] != StepStatus.PENDING or step["submission_round"] != r["current_round"]:
+        return None
+    org = store.router().org
+    old = step["approver_employee_id"]
+    end = org.employees[old]["employment_end"]
+    if end is None or end >= at.date():
+        return None
+    new, delegated_from = org.substitute(old, r["employee_id"], at.date())
+    if new is None:
+        return None
+    update = {"approval_step_id": step_id, "approver_employee_id": new}
+    if delegated_from is not None:
+        update["delegated_from_employee_id"] = delegated_from
+    store.record_reassignment(request_id, update, {
+        "approval_step_id": step_id, "event_type": ApprovalEventType.REASSIGNED.value, "actor_id": None,
+        "occurred_at": at, "reason_code": APPROVER_EMPLOYMENT_ENDED, "comment": f"{old} -> {new}",
+        "correlation_id": correlation_id})
+    return new
+
+
 # --- process-owner decisions (docs/05 9.4) ------------------------------------------------------------------------
 def may_decide_escalated(store: WorkflowStore, router: ApprovalRouter, r: dict, actor_id: str,
                          codes: list[str]) -> bool:
@@ -468,3 +503,8 @@ class InMemoryWorkflow:
                                        "correlation_id": res.correlation_id, **e})
         self.load_request(rid).update(res.request_updates)
         self.post_decision_rows(res)
+
+    def record_reassignment(self, request_id: str, step_update: dict, event: dict) -> None:
+        step = next(s for s in self.steps[request_id] if s["approval_step_id"] == step_update["approval_step_id"])
+        step.update({k: v for k, v in step_update.items() if k != "approval_step_id"})
+        self.approval_events.append(event)

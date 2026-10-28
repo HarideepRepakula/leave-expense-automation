@@ -16,6 +16,11 @@ person deciding) after the day of assignment, n = max(1, delay); assignment at o
 day, so every decision is more than 24 hours after its assignment and an S22 partner submitted at most 24 hours
 earlier is never decided first. The delay in business days is a keyed draw on the delays stream (key: request id,
 round, level or PROCESS_OWNER), so it depends only on its key. Events after the as-of instant do not happen.
+
+Approver leaves (AMB-P7B-11): when the assigned approver's employment ends before the decision date, the step is
+reassigned (approval_service.reassign_departed, the routing substitution) at 00:00 UTC on the day after the
+employment end, or at the assignment when that is later; the new approver decides on the same timing counted from
+the reassignment, keyed (request id, round, level, new approver). Nobody to substitute -> the step stays pending.
 """
 from __future__ import annotations
 
@@ -26,7 +31,13 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Callable
 
 from src.common.enums import AttemptedAction, AttemptOutcome, StepStatus, WorkflowStatus
-from src.services.approval_service import DecisionResult, ProcessOwnerPolicy, decide_escalated, decide_step
+from src.services.approval_service import (
+    DecisionResult,
+    ProcessOwnerPolicy,
+    decide_escalated,
+    decide_step,
+    reassign_departed,
+)
 from src.services.calendar_service import HolidayCalendar
 from src.services.exception_service import ExceptionCatalogue
 
@@ -100,6 +111,7 @@ class DecisionDriver:
     def __init__(self, store, catalogue: ExceptionCatalogue, timing: DecisionTiming | None, queue: EventQueue) -> None:
         self.store, self.catalogue, self.timing, self.queue = store, catalogue, timing, queue
         self.decided: list[DecisionResult] = []
+        self.reassigned: dict[str, datetime] = {}       # step id -> instant of its latest reassignment
 
     def _correlation(self, rid: str, what: str) -> uuid.UUID:
         return uuid.uuid5(SIM_NAMESPACE, f"{rid}:{what}")
@@ -117,8 +129,15 @@ class DecisionDriver:
         if r["workflow_status"] == WorkflowStatus.PENDING_APPROVAL:
             step = next(s for s in self.store.steps_of(rid) if s["submission_round"] == rnd
                         and s["step_status"] == StepStatus.PENDING and s["assigned_at"] is not None)
-            when = self.timing.decision_at(step["assigned_at"], step["required_level"],
-                                           (rid, rnd, step["required_level"]), step["approver_employee_id"])
+            sid, level, approver = step["approval_step_id"], step["required_level"], step["approver_employee_id"]
+            base = self.reassigned.get(sid, step["assigned_at"])
+            key = (rid, rnd, level) if sid not in self.reassigned else (rid, rnd, level, approver)
+            when = self.timing.decision_at(base, level, key, approver)
+            end = self.store.router().org.employees[approver]["employment_end"]
+            if end is not None and when.date() > end:      # AMB-P7B-11: reassign before anyone decides
+                at = max(base, datetime.combine(end + timedelta(days=1), time(0), tzinfo=timezone.utc))
+                self._push(at, rid, lambda at, s=step: self._reassign(rid, s, at))
+                return
             self._push(when, rid, lambda at, s=step: self._approve(rid, s, at))
         elif r["workflow_status"] == WorkflowStatus.ESCALATED_FOR_REVIEW:
             codes = {c for c in self.store.round_codes(rid, rnd)
@@ -147,6 +166,12 @@ class DecisionDriver:
                                 AttemptedAction.APPROVE.value, at,
                                 self._correlation(rid, step["approval_step_id"])))
         self.after(rid)
+
+    def _reassign(self, rid: str, step: dict, at: datetime) -> None:
+        sid = step["approval_step_id"]
+        if reassign_departed(self.store, rid, sid, at, self._correlation(rid, f"{sid}:REASSIGN:{at.isoformat()}")):
+            self.reassigned[sid] = at
+            self.after(rid)
 
     def _process_owner(self, rid: str, owner: str, action: str, reason: str | None, at: datetime) -> None:
         rnd = self.store.load_request(rid)["current_round"]

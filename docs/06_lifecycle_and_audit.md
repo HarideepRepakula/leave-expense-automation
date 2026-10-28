@@ -79,6 +79,7 @@ Everything not in the table is illegal and raises IllegalTransition (HTTP 409). 
 | PENDING | REJECTED | accepted reject action |
 | PENDING | SKIPPED | an earlier step in the round was REJECTED (later steps never needed) |
 | PENDING | CANCELLED | request RETURNED_FOR_CORRECTION, CANCELLED, resubmitted, or re-routed after ESCALATED |
+| PENDING | PENDING (new approver) | the approver's employment ended before the decision (AMB-P7B-11): approver_employee_id changes, approval_event REASSIGNED appended (actor NULL = system); assigned_at and the ASSIGNED event stay |
 | APPROVED, REJECTED, SKIPPED, CANCELLED | any | none; decided steps are frozen by trigger |
 
 All steps for a round are created at routing time with step_status PENDING. assigned_at of step n+1 is set when step n is APPROVED (an approval_event ASSIGNED is written then). Resubmission creates new steps with NN continuing (AM-A5).

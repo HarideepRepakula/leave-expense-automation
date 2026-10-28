@@ -168,3 +168,12 @@ class SqlWorkflow:
             t = table(self.request_table)
             conn.execute(sa.update(t).where(t.c[self.fk] == res.request_id).values(res.request_updates))
         self.post_decision_rows(res)
+
+    def record_reassignment(self, request_id: str, step_update: dict, event: dict) -> None:
+        """AMB-P7B-11: the PENDING step's new approver and one REASSIGNED approval_event, in the caller's
+        transaction."""
+        st = table("approval_step")
+        self.conn.execute(sa.update(st).where(st.c.approval_step_id == step_update["approval_step_id"])
+                          .values({k: v for k, v in step_update.items() if k != "approval_step_id"}))
+        self.conn.execute(sa.insert(table("approval_event")).values(
+            approval_event_id=allocate_ids(self.conn, "approval_event", "APE", 1)[0], **event))

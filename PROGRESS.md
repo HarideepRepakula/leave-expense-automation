@@ -1,8 +1,8 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
 Current phase: Phase 7B (decisions, resubmission, process-owner decisions, S6 timing, CARRY_FORWARD rows)
-Status: COMPLETE including S19 option A (owner 2026-10-28). ONE OPEN ITEM: V-WF-05 finds 1 decision after the
-  approver's employment end (AMB-P7B-11, owner decision needed). Awaiting "APPROVED PHASE 7B".
+Status: COMPLETE including S19 option A (owner 2026-10-28) and AMB-P7B-11 option (1) (owner 2026-10-29; V-WF-05
+  PASS). Awaiting "APPROVED PHASE 7B".
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
@@ -122,13 +122,36 @@ S19 option A (owner 2026-10-28; AMB-P7B-09, ASM-P7B-11, DEC-P7B-09), applied aft
   5d85c28b7fc102c212a22a22db13d2531e5cf434abb6a13a5ad5c99f38e170fe; files vs e15dc94: 22 identical, 46 changed;
   pytest -q: 463 passed, 1 xfailed; ruff --select F,E9: All checks passed.
 
+AMB-P7B-11 option (1) (owner 2026-10-29; supersedes AMB-P7B-06; AMB-P7B-10 and the S19 test changes accepted):
+- approval_service.reassign_departed: a PENDING step whose approver's employment ended before the date goes to the
+  routing substitute (delegate, else next up, never the requester); approver_employee_id (and delegated_from for a
+  delegate) updated, assigned_at and the ASSIGNED event kept, approval_event REASSIGNED appended (actor NULL,
+  reason APPROVER_EMPLOYMENT_ENDED, comment "old -> new"). record_reassignment on the in-memory and SQL stores.
+- Simulation (workflow_simulation.DecisionDriver): decision date after the employment end -> reassign at 00:00 UTC the
+  day after the end (or at assignment, if later), new decision keyed (id, round, level, new approver) (ASM-P7B-12).
+  Oracle at_as_of mirrors it with its own _substitute (no src/services import).
+- Dataset effect: APR-EXP-2025-000483-02 reassigned 2025-12-15 17:00 UTC EMP-000190 -> EMP-000126, approved
+  2025-12-26 (was 2025-12-17 by EMP-000190). approval_event 5059 -> 5060; every other count, every planted and natural
+  scenario count, ground truth and every status at as-of unchanged. Fingerprint 28ece855... (was 5d85c28b...).
+- Tests: V-WF-05 xfail -> normal test (also checks ASSIGNED, REASSIGNED, APPROVED events); new unit test
+  test_a_step_whose_approver_has_left_is_reassigned_to_the_next_person_up.
+- Files changed: src/services/{approval_service,workflow_simulation}.py, src/repositories/base.py,
+  src/reference/oracle.py; tests/unit/test_approval_decisions.py, tests/validation/test_validation.py;
+  docs/05 (5.4, 9.5), 06 (3), 09 (ASM-P7B-10, ASM-P7B-12, AMB-P7B-06, AMB-P7B-11); data/manifest.json.
+- REAL results (2026-10-29): generate --load exit 0, lea_dev counts = generated; validation 22 checks, 0 failed,
+  V-WF-05 PASS (2518 subjects), M1 0/48254, M2 0/79435, M3 6981/6981; leave 800 AGREE / 0 DISAGREE; expense 1000
+  AGREE / 0 DISAGREE; reproducibility_check.ps1: 68 of 68 identical, RESULT: REPRODUCIBLE, exit 0; pytest -q 465 passed;
+  ruff --select F,E9: All checks passed.
+- Notes: the SQL record_reassignment has no DB test yet (the dataset path uses the in-memory store). The claim is
+  APPROVED at as-of with or without the reassignment, so the comparisons cannot tell the two timings apart; the unit
+  test and V-WF-05 cover the behaviour.
+
 Phase 8 MUST include (owner 2026-10-28):
 - Resubmission rounds and cancellations in the dataset (AMB-P7B-02; ASM-025, ASM-040).
 - S11 / S12 self-approval and unauthorised-approval attempt scenarios in the dataset (AMB-P7B-03).
 - The reimbursement row created at final approval (AMB-P7B-04; docs/06 8.2).
-- Resolve AMB-P7B-11 (V-WF-05) as the owner decides.
 
-Open issues: AMB-P7B-11 (V-WF-05); AMB-P7B-10 confirm; JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
+Open issues: DB test for SqlWorkflow.record_reassignment (Phase 8); JWT_SECRET before Phase 9; Groq limits unverified until Phase 9.
 
 Acceptance criteria after Phase 7B: 1-8, 13, 17, 21 MET; 9 approval routing MET for routing and decisions (agreed
 with the oracle at as-of on every record); 10 self-approval MET at service and DB level (guard + trigger, V-WF-02);

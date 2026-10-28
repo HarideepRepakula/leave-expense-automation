@@ -11,7 +11,7 @@ from decimal import Decimal
 import pytest
 
 from src.services.approval_service import DecisionRefused, IdempotencyConflict, IdempotentReplay, \
-    ProcessOwnerPolicy, decide_escalated, decide_step, step_key
+    ProcessOwnerPolicy, decide_escalated, decide_step, reassign_departed, step_key
 from src.services.lifecycle import IllegalTransition
 from src.services.workflow_simulation import DecisionTiming
 from tests.unit import leave_world as lw
@@ -226,6 +226,26 @@ def test_budget_override_by_the_finance_controller_and_release_on_reject():
         "UNAUTHORIZED_APPROVER"                                  # neither process owner nor the L4
     decide_escalated(s, "B2", CEO, "REJECT", at(2026, 6, 4, 17), CORR)
     assert [p["txn_type"] for p in s.budget_ledger if p["expense_claim_id"] == "B2"] == ["RESERVATION", "RELEASE"]
+
+
+# --- reassignment when the approver has left (AMB-P7B-11) -----------------------------------------------------------
+def test_a_step_whose_approver_has_left_is_reassigned_to_the_next_person_up():
+    s = leave_store()
+    rid = two_step(s)
+    decide(s, rid, 1, MGR)                                       # step 2 assigned to HEAD at 4 June 17:00
+    org = s.router().org
+    org.employees[HEAD] = {**org.employees[HEAD], "employment_end": date(2025, 6, 5)}
+    sid = f"APR-{rid}-02"
+    assert reassign_departed(s, rid, sid, at(2025, 6, 5, 17), CORR) is None      # still employed that day
+    assert reassign_departed(s, rid, sid, at(2025, 6, 6, 0), CORR) == CEO
+    step = s.steps[rid][1]
+    assert (step["approver_employee_id"], step["assigned_at"], step["step_status"]) ==         (CEO, at(2025, 6, 4, 17), "PENDING")                     # assignment time kept, nobody decided
+    events = [(e["event_type"], e["comment"]) for e in s.approval_events if e["approval_step_id"] == sid]
+    assert events == [("ASSIGNED", None), ("REASSIGNED", f"{HEAD} -> {CEO}")]    # history appended, not rewritten
+    assert reassign_departed(s, rid, sid, at(2025, 6, 9, 0), CORR) is None       # CEO is employed: no change
+    assert decide(s, rid, 2, HEAD, when=at(2025, 6, 9, 17)).reason_code == "UNAUTHORIZED_APPROVER"
+    assert decide(s, rid, 2, CEO, when=at(2025, 6, 9, 17)).outcome == "ACCEPTED"
+    assert s.requests[rid]["workflow_status"] == "APPROVED"
 
 
 # --- timing (ASM-024, S22 rule) -----------------------------------------------------------------------------------

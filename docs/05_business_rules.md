@@ -120,6 +120,7 @@ Rules are effective 2025-01-01 with open end. A test fixture adds RULE-E-005 (eq
 | Resolved approver is the requester | Move to the next person up the chain for that level; if none, level unresolved |
 | Resolved approver TERMINATED or employment_end < routing date | Active delegation for that approver covering the routing date -> delegate acts (approval_step.delegated_from_employee_id set); else next person up the chain; else unresolved |
 | Resolved approver has an active delegation (on leave) | Delegate acts |
+| Assigned approver's employment ends before the decision date (step still PENDING; AMB-P7B-11, owner 2026-10-29) | The step is reassigned by the same substitution as of the reassignment date (delegate, else next person up, never the requester): approval_step.approver_employee_id becomes the new person (delegated_from set when a delegate acts), assigned_at and the original ASSIGNED event stay, one approval_event REASSIGNED is appended (actor NULL = system, reason_code APPROVER_EMPLOYMENT_ENDED, comment "old -> new"). The new person decides under the same guards (self-approval, no skipped level). Nobody can act -> the step stays PENDING. src/services/approval_service.reassign_departed |
 | Requester is G7 (top of chain) | L1/L2/L3 unresolved -> NO_VALID_APPROVAL_PATH |
 | L1 is the G7 (root), so no skip-level exists for L2 (decided AMB-P3-03, 2026-10-28) | The G7 covers L2. Create ONE approval step for the G7 that records both levels it covers (L1 and L2), never two identical steps for the same person. Not NO_VALID_APPROVAL_PATH. approval_step.covered_levels (migration 0002, Phase 7A) records the levels the step covers; required_level is the highest |
 
@@ -210,7 +211,7 @@ For data generation only, approver behaviour is a function of the request state:
 | CORRECTABLE (RETURNED) | requester resubmits with the issue fixed in 50% of cases after a seeded delay; otherwise stays RETURNED (ASM-025) |
 | decision date > AS_OF_DATE | remains PENDING_APPROVAL / ESCALATED |
 
-Delays are the only stochastic element and come from the "delays" RNG stream. Timing (Phase 7B, ASM-P7B-02): decided at 17:00 UTC on the max(1, delay)-th business day of the decider's country after the assignment day (from the next day when assigned at or after 17:00), so a decision is always more than 24 hours after its assignment; decisions after the as-of instant do not happen.
+Delays are the only stochastic element and come from the "delays" RNG stream. Timing (Phase 7B, ASM-P7B-02): decided at 17:00 UTC on the max(1, delay)-th business day of the decider's country after the assignment day (from the next day when assigned at or after 17:00), so a decision is always more than 24 hours after its assignment; decisions after the as-of instant do not happen. When that decision date is after the approver's employment end, the step is first reassigned (section 5.4, AMB-P7B-11) at 00:00 UTC on the day after the employment end, or at the assignment when later (ASM-P7B-12); the new approver's decision follows the same rule counted from the reassignment, with its own keyed delay (request id, round, level, new approver). The oracle mirrors this in its own timing model.
 
 ## 10. Human-readable reasons (spec 13.4)
 

@@ -322,7 +322,19 @@ class Oracle:
             if action != "APPROVED":
                 return action, t
         for step in x.route or []:
-            t = self.decided_at(t, step["level"], (x.record_id, 1, step["level"]), step["approver_id"])
+            approver, base, key = step["approver_id"], t, (x.record_id, 1, step["level"])
+            while True:
+                t = self.decided_at(base, step["level"], key, approver)
+                end = self.emps[approver]["employment_end"]
+                if end is None or t.date() <= end:
+                    break
+                # AMB-P7B-11: the approver has left before deciding -> reassigned the day after the employment
+                # end (or at the assignment, when later) to the substitute on that date; nobody -> stays pending.
+                base = max(base, datetime.combine(end + timedelta(days=1), time(0), tzinfo=timezone.utc))
+                approver = self._substitute(approver, emp_id, base.date())[0]
+                if base > self.as_of or approver is None:
+                    return "PENDING_APPROVAL", None
+                key = (x.record_id, 1, step["level"], approver)
             if t > self.as_of:
                 return "PENDING_APPROVAL", None
         return "APPROVED", None
