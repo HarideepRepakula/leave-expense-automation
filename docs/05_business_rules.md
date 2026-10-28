@@ -21,7 +21,7 @@ Rule IDs: BR-<area>-<nn>. Each rule names its exception code (docs/02 section 5)
 | BR-LBAL-06 | available_balance = opening + accrued + adjustments - used, maintained as a generated column on the snapshot and reconciled to SUM(ledger) by the validator. Mismatch is a validation failure, never silently corrected. | | test_balance_reconciliation |
 | BR-LBAL-07 | Pending reservation: available_for_validation(date) = available_balance - SUM(requested_quantity of the employee's PENDING_APPROVAL / ESCALATED requests on the same policy and year). Computed, not posted to the ledger (ASM-034). | | test_leave_validation |
 | BR-LBAL-08 | Negative balance permitted only when policy.negative_balance_allowed and resulting balance >= -negative_limit_days. Otherwise INSUFFICIENT_BALANCE at submission; or NEGATIVE_BALANCE_UNPERMITTED when found in the ledger by the detector (AM-A4). | INSUFFICIENT_BALANCE, NEGATIVE_BALANCE_UNPERMITTED | test_negative_balance_permitted_vs_anomaly |
-| BR-LBAL-09 | Requests spanning two leave years split the quantity by year for balance checks and usage posting (ASM-042). | | test_cross_year_request |
+| BR-LBAL-09 | Requests spanning two leave years split the quantity by year for balance checks and usage posting (ASM-042). Each part is checked against ITS OWN year's balance (decided AMB-P3-02, 2026-10-28): available_for_validation(year) = that year's posted ledger as of the submission date + that year's accrual/grant postings scheduled (BR-LBAL-03 schedule) on or before the part's start date and not yet posted - pending reservations of that year (BR-LBAL-07). Carry-forward into the next year is not counted, because it is unknown until Dec 31. Any failing part -> INSUFFICIENT_BALANCE. | INSUFFICIENT_BALANCE | test_cross_year_request |
 
 ## 2. Leave request validation (spec 13.1)
 
@@ -121,6 +121,7 @@ Rules are effective 2025-01-01 with open end. A test fixture adds RULE-E-005 (eq
 | Resolved approver TERMINATED or employment_end < routing date | Active delegation for that approver covering the routing date -> delegate acts (approval_step.delegated_from_employee_id set); else next person up the chain; else unresolved |
 | Resolved approver has an active delegation (on leave) | Delegate acts |
 | Requester is G7 (top of chain) | L1/L2/L3 unresolved -> NO_VALID_APPROVAL_PATH |
+| L1 is the G7 (root), so no skip-level exists for L2 (decided AMB-P3-03, 2026-10-28) | The G7 covers L2. Create ONE approval step for the G7 that records both levels it covers (L1 and L2), never two identical steps for the same person. Not NO_VALID_APPROVAL_PATH. Schema note for Phase 7: approval_step holds a single required_level today; a covered-levels column is added by a Phase 7 migration |
 
 ### 5.5 Guards at decision time (spec 13.3)
 

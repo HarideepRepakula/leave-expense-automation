@@ -21,6 +21,7 @@ Source of truth, in priority order:
 - Keep workflow status, exception class, technical processing status and audit events as separate dimensions.
 - Preserve immutable IDs and append-only history. Never overwrite past decisions.
 - Use synthetic data only. Keep secrets out of source code (.env, with .env.example committed).
+- Never print the contents of .env or any secret in output.
 - Do not silently resolve ambiguities: list each one with a proposed default and ask me.
 
 ## End of every phase

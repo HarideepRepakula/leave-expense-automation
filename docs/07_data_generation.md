@@ -171,7 +171,7 @@ Group A: planted anomaly records in the main dataset (count toward the 8-10 perc
 | S01 NEGATIVE_BALANCE_UNPERMITTED | leave + ledger | 8 | 8 | a 2025 ANNUAL request is forced APPROVED with quantity exceeding available at that time; USAGE posted; represents a legacy manual override. Service rules are bypassed for this historical row only; the detector must find it |
 | S02 OVERLAPPING_APPROVED_LEAVE | leave pairs | 8 pairs | 16 | second request of pair re-dated to overlap the first; both forced APPROVED in 2025 (legacy); detector must flag both |
 | S03 INSUFFICIENT_BALANCE | leave | 12 | 12 | quantity raised above available at submission on a policy forbidding negatives |
-| S19-L NO_VALID_APPROVAL_PATH (leave half) | leave | 4 | 4 | requester's manager terminated with no delegate and no skip-level; or G7 requester. S19 has 8 examples in total: 4 leave + 4 expense (S19-E below) |
+| S19-L NO_VALID_APPROVAL_PATH (leave half) | leave | 4 | 4 | requester's manager terminated with no delegate and no one above to substitute (exact construction fixed in Phase 4); or G7 requester. Never "L1 is the G7": that case resolves (AMB-P3-03), so natural cases cannot swamp the planted ones. S19 has 8 examples in total: 4 leave + 4 expense (S19-E below) |
 | S22 OVERLAPPING_PENDING_LEAVE | leave | 8 | 8 | request overlapping another request that is still PENDING at that simulated time |
 | S23 MEDICAL_CERT_REQUIRED | leave | 8 | 8 | SICK request of 4-7 days with medical_cert_flag false |
 | S05 MISSING_RECEIPT | expense | 10 | 10 | one line >= receipt threshold gets receipt_id NULL |

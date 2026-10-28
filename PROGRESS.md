@@ -62,6 +62,16 @@ Open issues / for owner decision:
 - OneDrive copy of the project still to be deleted by the owner (from the relocation note).
 - Groq names and limits (ASM-051, ASM-052) still unverified until Phase 9.
 
+Owner decisions 2026-10-28 (recorded in docs/09 section 7.3, docs/05, docs/07, CLAUDE.md):
+- AMB-P3-01 accepted; AMB-P3-02 changed (per-year check incl. scheduled accrual, docs/05 BR-LBAL-09);
+  AMB-P3-03 accepted with one step covering L1+L2 (docs/05 5.4; needs a Phase 7 migration); AMB-P3-04 accepted.
+- CLAUDE.md rule added: never print the contents of .env or any secret in output.
+- Not yet applied to data: the generator still uses the stricter cross-year guard (data and fingerprint
+  unchanged). Owner to choose: regenerate in Phase 3 with the per-year rule, or let Phase 5 implement it.
+Carried into Phase 4: at least 8 claims reach the L5 level (> 5,000 USD), planted or by amounts; the natural
+split-claim pair is labelled is_planted = false; S19 planted on a cause other than "L1 is the G7";
+.gitattributes for line endings; new JWT_SECRET before Phase 9.
+
 Acceptance criteria (spec section 25) after Phase 3:
 1 schema executable: MET (unchanged; full dataset loads and every CHECK/FK/trigger accepts it).
 2 entities and relationships present: MET; now populated (FK resolution test over every generated table).

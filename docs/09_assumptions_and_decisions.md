@@ -222,7 +222,15 @@ Listed with resolutions in docs/02 section 7 (CF-01..CF-11). All resolved in fav
 | DEC-40 | Generator dependencies are pinned to exact versions (numpy 2.2.6, Faker 37.4.0, PyYAML 6.0.2, bcrypt 4.3.0), because a Faker or numpy upgrade can change drawn values and therefore checksums. | Ranges (would silently break M13 after an upgrade). |
 | DEC-41 | Phase 3 data is a valid baseline only: re-draw (not repair) any draw that would overlap, exceed the balance at submission, leave employment, exceed the unpaid cap, exceed a policy limit, or come from the G7. Anomalies are planted only in Phase 4 (docs/07 section 7). | Generate and then repair records (harder to reason about); allow natural violations. |
 
-### 7.3 Open ambiguities found in Phase 3 (proposed default implemented; please confirm or change)
+### 7.3 Ambiguities found in Phase 3
+
+Owner decisions (2026-10-28):
+- AMB-P3-01: ACCEPTED as proposed.
+- AMB-P3-02: CHANGED. Split cross-year requests by leave year; check each part against its own year's balance including that year's scheduled accrual (docs/05 BR-LBAL-09 updated). The Phase 3 generator still uses the stricter posted-ledger guard, which is valid under the new rule but produces few cross-year requests (see PROGRESS.md).
+- AMB-P3-03: ACCEPTED with refinement. When the G7 is L1 and the only possible L2, create ONE step recording both levels (docs/05 section 5.4). Planted S19 cases use a different cause (docs/07 section 7.2).
+- AMB-P3-04: ACCEPTED, provided SICK, CASUAL and UNPAID keep enough examples to score (full run: SICK 252, UNPAID 98, CASUAL 59).
+
+Original proposals:
 
 | ID | Ambiguity | Proposed default |
 |---|---|---|
