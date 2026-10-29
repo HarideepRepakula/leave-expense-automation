@@ -146,6 +146,23 @@ def test_evaluation_endpoint_returns_the_evaluation_summary(client, ctx, engine,
     assert comp["leave_service_vs_oracle"]["available"] and comp["expense_service_vs_oracle"]["available"]
     assert "DISAGREE" not in comp["leave_service_vs_oracle"] and "DISAGREE" not in comp["expense_service_vs_oracle"]
     assert r.json()["status_at_asof_vs_expected"] == []           # lea_test holds no ground-truth rows
+    assert set(r.json()["data_quality"]) >= {"available", "M1", "M2", "M3"}  # Phase 10: from validation_report.json
+    det = r.json()["detection"]                                   # lea_test holds no labels, so nothing matches
+    assert det["overall"]["tp"] == 0 and det["overall"]["fn"] == 0 and "by_code" in det
+
+
+def test_detections_endpoint_adds_class_and_severity_and_is_for_analysts(client, ctx, manager, requester, tmp_path):
+    ctx.detections_file = tmp_path / "detections.csv"
+    assert client.get("/detections", headers=manager).json() == {"items": [], "available": False}
+    ctx.detections_file.write_text("record_type,record_id,exception_code,detected_by,detail\n"
+                                   "EXPENSE,EXP-2025-000009,SPLIT_CLAIM_SUSPECTED,BATCH_DETECTOR,pair\n",
+                                   encoding="utf-8")
+    r = client.get("/detections", headers=manager)
+    assert r.status_code == 200, r.text
+    assert r.json()["items"] == [{"record_type": "EXPENSE", "record_id": "EXP-2025-000009",
+                                  "exception_code": "SPLIT_CLAIM_SUSPECTED", "detected_by": "BATCH_DETECTOR",
+                                  "detail": "pair", "exception_class": "SUSPICIOUS_PATTERN", "severity": "SOFT"}]
+    assert client.get("/detections", headers=requester).status_code == 403
 
 
 def _imports(path: Path) -> set[str]:

@@ -45,11 +45,12 @@ def build_context(settings: Settings | None = None) -> ApiContext:
         settings=settings, catalogue=ExceptionCatalogue.from_config(cfg["exception_codes"]),
         weekend_days=cfg["calendar"]["weekend_days"], detection=DetectionParams.from_config(cfg["expense_policies"]),
         llm=llm_config(settings), clock=SystemClock(), engine=app_engine,
-        evaluation=evaluation_routes.default_evaluation(evaluation_engine, ROOT / "data" / "validation"))
+        evaluation=evaluation_routes.default_evaluation(evaluation_engine, ROOT / "data" / "validation"),
+        detections_file=ROOT / "data" / "validation" / "detections.csv")
 
 
 def create_app(ctx: ApiContext | None = None) -> FastAPI:
-    app = FastAPI(title="Leave and Expense Approval API", version="0.9.0",
+    app = FastAPI(title="Leave and Expense Approval API", version="0.10.0",
                   description="Synthetic data only. Errors: {\"error\": {\"code\", \"message\", \"details\"}}. "
                               "Log in at POST /auth/login, then use the token as a Bearer token.")
     app.state.ctx = ctx or build_context()

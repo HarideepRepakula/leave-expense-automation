@@ -79,7 +79,7 @@ def test_migration_downgrade_and_upgrade_cycle(engine, test_url):
     assert "ops" in insp.get_schema_names() and "ground_truth" in insp.get_schema_names()
     with engine.connect() as conn:
         version = conn.execute(sa.text("SELECT version_num FROM alembic_version")).scalar()
-    assert version == "0002_step_covered_levels"
+    assert version == "0003_analytics_views"
 
 
 def _step_columns(engine) -> dict[str, dict]:

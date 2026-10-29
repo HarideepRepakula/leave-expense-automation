@@ -1,6 +1,8 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 9 (FastAPI backend) - DONE, waiting for "APPROVED PHASE 9".
+Current phase: Phase 10 (Streamlit dashboard) - DONE, waiting for "APPROVED PHASE 10".
+Phase 9: APPROVED 2026-10-29 (commit 90c730a). AMB-P9-01 and AMB-P9-02 accepted, recorded as known limitations in
+  README.md; Groq model openai/gpt-oss-20b accepted; AMB-P9-03 stays open (docs/09 14.4).
 Status: Phase 8 CLOSED 2026-10-29 (8A d9eeca9 accepted; 8B-1 6f1b4e1 APPROVED; 8B-2 DEFERRED to future work).
 
 Phase 8 closure (owner 2026-10-29):
@@ -61,6 +63,54 @@ Phase 8 split (2026-10-29, owner allowed a split): 8A = carried-over items 1-2, 
 
 Phase 8A: accepted by the owner 2026-10-29 (commit d9eeca9); 8B plan approved with conditions (docs/09 13.4).
 
+## Phase 10 record
+
+Scope implemented: one read-only Streamlit app (src/dashboard: app.py login + navigation, client.py read paths,
+views.py Overview / Requests / Exceptions, evaluation_view.py Evaluation). Login through POST /auth/login. Aggregates
+from three ops views (migration 0003_analytics_views: v_request, v_request_exception, v_reimbursement) as
+lea_analytics_ro (SELECT on the views only; lea_app has no rights on them); request detail, explanation (source llm /
+template shown), GET /detections (new) and GET /evaluation (extended with M1-M3 and detection TP / FP / FN) through
+the API. Only evaluation_view.py calls /evaluation; the dashboard imports nothing from src/reference, src/evaluation,
+src/services, src/repositories or src/models (tested). Decisions DEC-P10-01..08, ambiguities AMB-P10-01..04 (defaults
+applied; docs/09 section 15).
+
+Files created: migrations/versions/0003_analytics_views.py; src/dashboard/{app,client,views,evaluation_view}.py;
+tests/dashboard/{__init__,test_dashboard}.py; scripts/start_dashboard.ps1; docs/13_dashboard_guide.md.
+Files changed: src/evaluation/summary.py (data_quality, detection); src/api/routes.py (GET /detections), core.py
+(detections_file), main.py (detections_file, version 0.10.0); tests/api/test_api.py; tests/db/
+test_roles_and_migration_cycle.py (head = 0003); requirements.txt (streamlit==1.50.0, pandas==2.3.3); pyproject.toml
+(0.10.0); sql/grants.sql (comment only); README.md (status, known limitations); docs/03 (4.5), docs/09 (14.4, 15),
+docs/10, docs/14 (section 8), docs/15; PROGRESS.md. No data change (numpy still 2.2.6).
+
+Commands:
+    python -m pip install -r requirements.txt
+    alembic upgrade head                          # adds the analytics views to lea_dev
+    .\scripts\start_dashboard.ps1                  # or two windows:
+    uvicorn src.api.main:create_app --factory --port 8000
+    streamlit run src/dashboard/app.py            # http://localhost:8501
+    python -m src.validation
+    python -m src.evaluation.leave_service_vs_oracle
+    python -m src.evaluation.expense_service_vs_oracle
+    .\scriptseproducibility_check.ps1
+    pytest -q
+
+REAL results (2026-10-29):
+- pytest -q: 513 passed, 1 warning (starlette DeprecationWarning) in 70.88s (506 + 7 new). ruff --select F,E9 src
+  tests migrations: All checks passed.
+- Validation: 22 checks PASS, 0 failed; M1 0/66090, M2 0/92252, M3 7883/7883.
+- Leave comparison 800 AGREE / 0 DISAGREE; expense 1000 AGREE / 0 DISAGREE.
+- reproducibility_check.ps1: 76 of 76 identical, fingerprint 60d8e077... (unchanged), RESULT: REPRODUCIBLE, exit 0.
+- Detection results on lea_dev (GET /evaluation): 226 TP, 0 FP, 0 FN (precision 1.0, recall 1.0).
+- Live start: uvicorn /docs 200 and streamlit /_stcore/health 200 "ok" (both started, probed, stopped).
+
+Open issues: AMB-P10-01..04; AMB-P9-03; docs/02 traceability rows R-20.x / AM-F3 still name the planned test files
+(update in Phase 12); spec 20 analytics not in the 4-view scope (approval aging, approver workload, leave
+utilisation, turnaround, filters by department / manager / cost center / date) stay future work; the deferred 8B-2
+migration becomes 0004.
+
+Acceptance criteria after Phase 10: "the dashboard works" (spec 20): MET for the scoped 4 views; operational views
+separate from ground-truth evaluation views: MET (tested); others as after Phase 9.
+
 ## Phase 9 record
 
 Scope implemented: FastAPI app (src/api: core.py context / transactions / JWT / errors, routes.py operational routes,
@@ -92,7 +142,8 @@ Commands:
     python -m src.validation
     python -m src.evaluation.leave_service_vs_oracle
     python -m src.evaluation.expense_service_vs_oracle
-    .\scriptseproducibility_check.ps1
+    .\scripts
+eproducibility_check.ps1
     pytest -q
 
 REAL results (2026-10-29):

@@ -113,6 +113,10 @@ decision_output (codes, amounts, template text)
 
 As built in Phase 9 (DEC-29 revised): GET /requests/{id}/explanation; facts from the request's own ops rows (codes, status, steps, amount; no names or emails); model openai/gpt-oss-20b by default (config/llm.yaml, GROQ_MODEL overrides); source "llm" or "template"; no cache.
 
+### 4.5 Dashboard read paths (Phase 10)
+
+As built: aggregates from ops.v_request, ops.v_request_exception and ops.v_reimbursement (migration 0003) as lea_analytics_ro (SELECT on those views only); request detail, explanation, GET /detections and GET /evaluation through the API with the user's JWT. Only src/dashboard/evaluation_view.py calls /evaluation. Guide: docs/13_dashboard_guide.md.
+
 ## 5. Technology choices and rationale
 
 | Concern | Choice | Why |

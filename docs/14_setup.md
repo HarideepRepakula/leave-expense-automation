@@ -92,3 +92,14 @@ Database tests use TEST_DATABASE_URL (lea_test). They reset that database with d
 | `refusing to run tests against non-test database` | TEST_DATABASE_URL points at lea_dev | fix the URL to end with /lea_test |
 | db tests skipped: "test database not reachable" | PostgreSQL not running or wrong port | start the service (services.msc, postgresql-x64-16) or `docker compose up -d` |
 | `extension "btree_gist" is not available` | test DB created without the init script | `psql -U postgres -d lea_test -c "CREATE EXTENSION btree_gist"` |
+
+## 8. Start the API and the dashboard (Phase 10)
+
+```powershell
+alembic upgrade head              # once: migration 0003 adds the analytics views
+.\scripts\start_dashboard.ps1     # API in a new window (port 8000), dashboard here (http://localhost:8501)
+```
+
+Two windows by hand: `uvicorn src.api.main:create_app --factory --port 8000`, then
+`streamlit run src/dashboard/app.py`. macOS / Linux: the same two commands in two terminals. Details:
+docs/13_dashboard_guide.md.

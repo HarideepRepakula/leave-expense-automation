@@ -606,3 +606,11 @@ See docs/04 section 2 for the full relationship catalogue. In short: department 
 
 - leave_request.decision_reason_code = LEGACY_APPROVAL marks a legacy approval (S01/S02), a raw input written by stage S5 (DEC-P7B-02). Other values are exception codes (ASM-P5-08) or decision reasons (APPROVER_REJECTED, APPROVER_RETURNED, PROCESS_OWNER_ACCEPTED, BUDGET_OVERRIDE, ASM-P7B-03).
 - Stage S6 (Phase 7B) populates approval_step, approval_event, approval_attempt, request_status_event, request_exception, idempotency_record and cost_center_transaction in the generated dataset; their columns are unchanged.
+
+## Phase 10 analytics views (migration 0003_analytics_views)
+
+Read-only views in ops; SELECT for lea_analytics_ro only (lea_app: no rights). No business rule, only projections.
+
+- ops.v_request: request_type (LEAVE / EXPENSE), request_id, employee_id, country (claim country; employee country for leave), department_id, workflow_status, exception_class, current_round, first_submitted_at, period_start, period_end, leave_days (leave: requested_quantity), total_amount, approved_amount, currency, total_amount_usd (expense only; NULL for leave), decision_reason_code
+- ops.v_request_exception: exception_id, request_type, request_id, submission_round, exception_code, exception_class, severity (from exception_code), detected_by, detected_at; current round only
+- ops.v_reimbursement: reimbursement_id, expense_claim_id, employee_id, approved_amount, currency, eligibility_status, reimbursement_status, created_at, completed_at

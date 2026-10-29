@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Callable
 
 import bcrypt
@@ -46,6 +47,7 @@ class ApiContext:
     evaluation: Callable[[], dict]                 # src/evaluation summary (lea_evaluation)
     http_client: httpx.Client | None = None        # Groq calls; tests pass a mocked transport
     conn: sa.Connection | None = None              # tests: every request runs in this connection (savepoints)
+    detections_file: Path | None = None            # data/validation/detections.csv (system detector output)
 
 
 def get_ctx(request: Request) -> ApiContext:

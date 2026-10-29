@@ -92,3 +92,17 @@ Real output only. PROGRESS.md and the end-of-phase report quote the actual pytes
 - tests/api/test_explanation.py: Groq call mocked with httpx.MockTransport: success; fallback on 5xx (one retry),
   401, timeout, 429 (no retry), failed output check, forbidden word; no key and flag off make no call; (db) decisions
   and every stored row identical with and without the explanation.
+
+## Phase 10 tests
+
+- tests/dashboard/test_dashboard.py:
+  - isolation (no database): the dashboard imports nothing from src/reference, src/evaluation, src/services,
+    src/repositories or src/models; no string names the ground-truth schema; only evaluation_view.py calls
+    /evaluation, and it opens no connection or file;
+  - (db) lea_analytics_ro reads the three views and is denied the tables, ground truth and writes; lea_app cannot
+    write through a view;
+  - smoke on lea_dev (read-only; skips if unavailable): AppTest logs in through the in-process API as a synthetic
+    analyst and renders Overview, Requests (with the detail panel and "Source: template"), Exceptions and
+    Evaluation with no exception and no error; a wrong password shows INVALID_CREDENTIALS and no session.
+- tests/api/test_api.py: GET /evaluation also returns data_quality and detection; GET /detections adds class and
+  severity, returns available=false without the file, and is 403 for a requester.

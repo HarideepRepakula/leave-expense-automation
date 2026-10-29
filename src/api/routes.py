@@ -5,6 +5,7 @@ Workflow status, exception class, technical status (processing_failure) and audi
 fields in every response, as stored."""
 from __future__ import annotations
 
+import csv
 from datetime import date
 from decimal import Decimal
 from typing import Literal
@@ -279,6 +280,22 @@ def get_expense_claim(request_id: str, user: CurrentUser = Depends(current_user)
     if rr.kind_of(request_id) != "EXPENSE":
         raise ApiError(404, "NOT_FOUND", f"unknown expense claim {request_id}")
     return respond(read(ctx, lambda conn: _detail(conn, "EXPENSE", request_id, user)))
+
+
+@router.get("/detections", tags=["exceptions"],
+            summary="System detections (submission and batch detectors) with exception class and severity")
+def list_detections(user: CurrentUser = Depends(require("PROCESS_OWNER", "OPS_ANALYST", "SYSTEM_ADMIN")),
+                    ctx: ApiContext = Depends(get_ctx)):
+    """Phase 10: the detector output written by python -m src.validation (operational, not ground truth). An empty
+    list when the file has not been written yet."""
+    if ctx.detections_file is None or not ctx.detections_file.exists():
+        return respond({"items": [], "available": False})
+    with ctx.detections_file.open(encoding="utf-8", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+    for row in rows:
+        info = ctx.catalogue.info(row["exception_code"])
+        row["exception_class"], row["severity"] = str(info.exception_class), str(info.severity)
+    return respond({"items": rows, "available": True})
 
 
 @router.get("/requests/{request_id}/explanation", tags=["explanation"],

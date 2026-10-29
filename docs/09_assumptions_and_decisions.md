@@ -621,3 +621,34 @@ no S11 / S12 / S18 rows (actual counts NULL).
 | AMB-P9-01 | Should first submissions accept a client Idempotency-Key (the services only record RESUBMIT keys)? | No; submissions are not idempotent through the API yet. |
 | AMB-P9-02 | Should a token be re-checked against user_role / is_active on every call? | No; roles from login are trusted until expiry (8 h). |
 | AMB-P9-03 | Groq limits: the docs label the table ambiguously (Free vs Developer). | Recorded both the figures and the caveat (14.1); verify on the console limits page. |
+
+### 14.4 Phase 9 approval (owner 2026-10-29)
+
+APPROVED PHASE 9 (commit 90c730a). AMB-P9-01 and AMB-P9-02 accepted as applied and recorded as known limitations in
+README.md (first submissions are not idempotent through the API; a token's roles are trusted until it expires).
+Groq default model openai/gpt-oss-20b accepted. AMB-P9-03 (Free vs Developer limits label) stays open: verify on the
+Groq console limits page.
+
+## 15. Phase 10: Streamlit dashboard
+
+### 15.1 Phase 10 decisions and assumptions (ASSUMPTION, illustrative synthetic)
+
+| ID | Decision |
+|---|---|
+| DEC-P10-01 | Data paths (docs/03 7.1, AM-F3): aggregates from three read-only views (ops.v_request, ops.v_request_exception, ops.v_reimbursement; migration 0003_analytics_views) as lea_analytics_ro, which gets SELECT on these views only; one request's detail, the explanation, the detections and the evaluation through the API with the user's JWT. The dashboard never connects as lea_app or lea_evaluation. |
+| DEC-P10-02 | lea_app gets no rights on the views (REVOKE ALL in the migration): the default privileges would grant it write rights, and a simple view is updatable through its owner's table rights. |
+| DEC-P10-03 | Amounts are summed exactly (Decimal) per currency; the only cross-currency figure is the sum of the stored total_amount_usd. No conversion is done in the dashboard. |
+| DEC-P10-04 | GET /evaluation also returns M1-M3 (from validation_report.json) and detection results: detections = (record, code) from request_exception (any round), detections.csv, BLOCKED DUPLICATE_REIMBURSEMENT attempts and reimbursement processing_failure rows (docs/08 section 1); positives = anomaly_label with expected_detection = DETECT; TP / FP / FN, precision, recall overall and per code. A preliminary M6-M8; the full report stays in Phase 11. Dev dataset: 226 TP, 0 FP, 0 FN. |
+| DEC-P10-05 | New GET /detections (PROCESS_OWNER, OPS_ANALYST, SYSTEM_ADMIN): the detector output data/validation/detections.csv (operational system output, not ground truth) with exception_class and severity from the catalogue. Batch-detector rows exist only in that file, not in the database. |
+| DEC-P10-06 | Dashboard access: APPROVER, PROCESS_OWNER, OPS_ANALYST, SYSTEM_ADMIN (the API's read-all roles). A requester-only user is refused, because the analytics views have no per-user filter. Evaluation: analysts and admins (enforced by the API). |
+| DEC-P10-07 | streamlit==1.50.0 and pandas==2.3.3 pinned; numpy stays 2.2.6 (dataset checksums unchanged). |
+| DEC-P10-08 | The AppTest smoke test runs on lea_dev read-only: the real API context in-process (TestClient), LLM explanations forced off, a synthetic analyst (USR-000010) from data/processed/dev_credentials.csv. Login and GET routes write nothing. It skips when lea_dev, migration 0003 or the passwords are missing. |
+
+### 15.2 Ambiguities found in Phase 10 (default APPLIED; please confirm or change)
+
+| ID | Question | Default applied |
+|---|---|---|
+| AMB-P10-01 | "Class (hard / correctable / soft)": in the schema HARD / CORRECTABLE / SOFT / INFO is the SEVERITY of an exception code; exception_class (POLICY_VIOLATION, SUSPICIOUS_PATTERN, ...) is a separate dimension. | The Exceptions view shows both: counts by severity, by code with class and severity, and requests by exception_class. |
+| AMB-P10-02 | GET /evaluation did not return M1-M3 or detection results. | Extended src/evaluation/summary.py (DEC-P10-04); attempt and failure rows count as detections as docs/08 section 1 says. |
+| AMB-P10-03 | Migration number: 0003 was earmarked for the deferred 8B-2 ground_truth.record_round_expectation (13.4). | 0003 = analytics views; the deferred migration becomes 0004 when 8B-2 is scheduled. |
+| AMB-P10-04 | Suspicious-pattern detections: exception_class SUSPICIOUS_PATTERN only, or every detector row? | SUSPICIOUS_PATTERN only (duplicate receipts, split claims); every code is counted in "By exception code". |
