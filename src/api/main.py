@@ -50,7 +50,7 @@ def build_context(settings: Settings | None = None) -> ApiContext:
 
 
 def create_app(ctx: ApiContext | None = None) -> FastAPI:
-    app = FastAPI(title="Leave and Expense Approval API", version="0.10.0",
+    app = FastAPI(title="Leave and Expense Approval API", version="1.0.0",
                   description="Synthetic data only. Errors: {\"error\": {\"code\", \"message\", \"details\"}}. "
                               "Log in at POST /auth/login, then use the token as a Bearer token.")
     app.state.ctx = ctx or build_context()

@@ -668,7 +668,7 @@ becomes 0005.
 |---|---|
 | DEC-CP-01 | New read-only API routes (src/api/read_routes.py), JWT + role, limit / offset (max 200; audit history 1000): GET /employees (APPROVER, PROCESS_OWNER, OPS_ANALYST, SYSTEM_ADMIN; organisation fields only, full_name / email / employment dates for SYSTEM_ADMIN only), /leave-policies and /expense-policies (any logged-in user), /leave-balances and /expense-lines (a requester sees only their own; staff roles anyone's; lines without merchant text), /approval-queue (assigned PENDING steps; an approver sees only their own queue, analysts any), /requests/{id}/audit-history and /requests/{id}/investigation (PROCESS_OWNER, OPS_ANALYST, SYSTEM_ADMIN), /dashboard/metrics (staff roles). |
 | DEC-CP-02 | Migration 0004_analytics_views_2: seven more read-only views for lea_analytics_ro (v_employee, v_request_dimension, v_expense_line, v_approval_step, v_approval_attempt, v_reimbursement_attempt, v_processing_failure); no names, e-mail, merchant text or error messages; lea_app gets nothing. The deferred 8B-2 migration becomes 0005. |
-| DEC-CP-03 | "High-priority issues" = distinct requests ESCALATED_FOR_REVIEW or with a HARD exception code in their current round, plus OPEN reimbursement processing_failure rows. Same definition in the dashboard Overview and GET /dashboard/metrics. Dev dataset: 43 requests + 37 failures = 80. |
+| DEC-CP-03 | (Amended by AMB-CP-03, 16.3: OPEN requests only.) "High-priority issues" = distinct requests ESCALATED_FOR_REVIEW or with a HARD exception code in their current round, plus OPEN reimbursement processing_failure rows. Same definition in the dashboard Overview and GET /dashboard/metrics. Dev dataset: 43 requests + 37 failures = 80. |
 | DEC-CP-04 | M4, M16, M17 lead with the figure over requests without a planted anomaly (spec 17); the all-requests figure is in the breakdown (docs/08 section 7). |
 | DEC-CP-05 | M5 population: requests that reached routing plus expected routing exceptions; the expected route of requests stopped before routing is not compared (docs/08 section 7). |
 | DEC-CP-06 | M13 reads data/validation/reproducibility.json, written by compare_runs --report (both reproducibility scripts pass it). |
@@ -683,3 +683,16 @@ becomes 0005.
 | AMB-CP-02 | Leave utilisation (spec 20) needs entitlement from the balance ledger, which no analytics view exposes. | Not shown; "days approved" shown instead. Option: a v_leave_balance view in a later migration. |
 | AMB-CP-03 | High-priority issues counts HARD-exception requests that are already REJECTED (closed). | Counted, as the instruction suggested; can be limited to open requests. |
 | AMB-CP-04 | Filters: the Requests page keeps its own filters (type, status, exception class, country, id); the full spec-20 filter set is on Analytics and Approval operations. | Applied. |
+
+### 16.3 Owner decisions (APPROVED COMPLETION, 2026-10-29, commit 8a70857)
+
+- AMB-CP-01: M5 = routing AT SUBMISSION. A reassigned step counts with its original assignee. The ASSIGNED
+  approval_event stores no approver, so the original is read from the preserved reassignment audit row
+  (audit_event.calculated_values "from"; the approval_event REASSIGNED comment holds the same text). Both figures
+  are reported: at submission 1665 / 1665 = 100%, current assignee 1664 / 1665 = 99.94% (EXP-2025-000483,
+  reassigned under AMB-P7B-11: a later documented event, not a routing error). docs/08 section 7.
+- AMB-CP-02: leave utilisation skipped; known limitation (docs/19, README).
+- AMB-CP-03: high-priority issues = OPEN requests (not APPROVED, REJECTED or CANCELLED) that are ESCALATED_FOR_REVIEW
+  or carry a HARD exception in the current round, plus OPEN reimbursement processing failures. Amends DEC-CP-03.
+  Dev dataset after the change: 23 open requests + 37 failures = 60 (was 80).
+- AMB-CP-04: accepted.

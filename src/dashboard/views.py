@@ -28,11 +28,13 @@ def _table(rows: list[dict]) -> pd.DataFrame:
 # --- Overview ---------------------------------------------------------------------------------------------------
 
 def high_priority(req: pd.DataFrame) -> dict:
-    """High-priority issues (DEC-CP-03): distinct requests ESCALATED_FOR_REVIEW or with a HARD exception code in
-    their current round, plus OPEN reimbursement processing failures. Same definition as GET /dashboard/metrics."""
+    """High-priority issues (DEC-CP-03, AMB-CP-03): distinct OPEN requests (not APPROVED, REJECTED or CANCELLED)
+    that are ESCALATED_FOR_REVIEW or carry a HARD exception code in their current round, plus OPEN reimbursement
+    processing failures. Same definition as GET /dashboard/metrics."""
     ex, failures = client.frame("exceptions"), client.frame("failures")
     hard = set(ex[ex.severity == "HARD"].request_id)
-    requests_ = int((req.workflow_status.eq("ESCALATED_FOR_REVIEW") | req.request_id.isin(hard)).sum())
+    open_ = ~req.workflow_status.isin(["APPROVED", "REJECTED", "CANCELLED"])
+    requests_ = int((open_ & (req.workflow_status.eq("ESCALATED_FOR_REVIEW") | req.request_id.isin(hard))).sum())
     open_failures = int(((failures.entity_type == "reimbursement") & (failures.resolution_status == "OPEN")).sum())
     return {"requests": requests_, "payment_failures": open_failures, "total": requests_ + open_failures}
 
@@ -54,8 +56,8 @@ def overview(token: str, user: dict) -> None:
     c[1].metric("Escalated for review", int((req.workflow_status == "ESCALATED_FOR_REVIEW").sum()))
     c[2].metric("Returned for correction", int((req.workflow_status == "RETURNED_FOR_CORRECTION").sum()))
     c[3].metric("High-priority issues", issues["total"])
-    c[3].caption(f"{issues['requests']} requests escalated for review or with a HARD exception (current round), "
-                 f"plus {issues['payment_failures']} open reimbursement processing failures.")
+    c[3].caption(f"{issues['requests']} open requests (not approved, rejected or cancelled) escalated for review or "
+                 f"with a HARD exception, plus {issues['payment_failures']} open reimbursement processing failures.")
     c = st.columns(4)
     c[0].metric("Approved", int((req.workflow_status == "APPROVED").sum()))
     c[1].metric("Rejected", int((req.workflow_status == "REJECTED").sum()))

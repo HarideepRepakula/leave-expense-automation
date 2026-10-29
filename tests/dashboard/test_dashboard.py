@@ -199,7 +199,8 @@ def test_overview_kpis_equal_direct_database_counts(dev_dashboard):
                    count(*) FILTER (WHERE workflow_status = 'APPROVED') AS approved,
                    count(*) FILTER (WHERE workflow_status = 'REJECTED') AS rejected,
                    count(*) FILTER (WHERE exception_class <> 'NONE') AS with_exception,
-                   count(*) FILTER (WHERE workflow_status = 'ESCALATED_FOR_REVIEW' OR id IN (SELECT id FROM hard))
+                   count(*) FILTER (WHERE workflow_status NOT IN ('APPROVED', 'REJECTED', 'CANCELLED')
+                                    AND (workflow_status = 'ESCALATED_FOR_REVIEW' OR id IN (SELECT id FROM hard)))
                    + (SELECT count(*) FROM ops.processing_failure
                       WHERE entity_type = 'reimbursement' AND resolution_status = 'OPEN') AS high_priority
             FROM req""")).mappings().one()

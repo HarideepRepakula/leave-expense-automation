@@ -159,8 +159,9 @@ DASHBOARD_METRICS = sa.text("""
            count(*) FILTER (WHERE workflow_status = 'RETURNED_FOR_CORRECTION') AS returned_for_correction,
            count(*) FILTER (WHERE exception_class <> 'NONE') AS requests_with_exception,
            count(*) FILTER (WHERE request_id IN (SELECT request_id FROM hard)) AS hard_exception_requests,
-           count(*) FILTER (WHERE workflow_status = 'ESCALATED_FOR_REVIEW'
-                            OR request_id IN (SELECT request_id FROM hard)) AS escalated_or_hard_requests,
+           count(*) FILTER (WHERE workflow_status NOT IN ('APPROVED', 'REJECTED', 'CANCELLED')
+                            AND (workflow_status = 'ESCALATED_FOR_REVIEW'
+                                 OR request_id IN (SELECT request_id FROM hard))) AS escalated_or_hard_requests,
            (SELECT count(*) FROM ops.processing_failure
             WHERE entity_type = 'reimbursement' AND resolution_status = 'OPEN') AS open_payment_failures
     FROM req""")
@@ -173,8 +174,9 @@ AMOUNTS_BY_CURRENCY = sa.text("""
 
 
 def dashboard_metrics(conn: sa.Connection) -> dict:
-    """Operational KPIs (no ground truth). high_priority_issues = distinct requests ESCALATED_FOR_REVIEW or with
-    a HARD exception code in the current round, plus OPEN reimbursement processing failures (DEC-CP-03)."""
+    """Operational KPIs (no ground truth). high_priority_issues = distinct OPEN requests (not APPROVED, REJECTED or
+    CANCELLED) that are ESCALATED_FOR_REVIEW or carry a HARD exception code in the current round, plus OPEN
+    reimbursement processing failures (DEC-CP-03 as amended by AMB-CP-03)."""
     m = dict(conn.execute(DASHBOARD_METRICS).mappings().one())
     m["high_priority_issues"] = m["escalated_or_hard_requests"] + m["open_payment_failures"]
     rb = table("reimbursement")

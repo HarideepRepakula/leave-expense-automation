@@ -1,7 +1,38 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Completion pass against the spec (after Phase 10) - DONE, waiting for "APPROVED COMPLETION".
+Current phase: Phases 11 + 12 merged (integration, final evaluation, documentation, release preparation) - DONE,
+waiting for "APPROVED RELEASE". Version 1.0.0; tag v1.0.0 NOT created; nothing pushed.
+Completion pass: APPROVED 2026-10-29 (commit 8a70857). AMB-CP-01 (M5 at submission + current-assignee figure),
+  AMB-CP-02 (leave utilisation skipped, known limitation), AMB-CP-03 (high-priority issues: open requests only),
+  AMB-CP-04 accepted; recorded in docs/09 16.3.
 Phase 10: APPROVED 2026-10-29 (commit 62e065d). AMB-P10-01..04 accepted as applied (docs/09 15.3).
+
+## Phases 11 + 12 record (2026-10-29)
+
+Done:
+- AMB-CP-01: src/evaluation/metrics.py M5 headline = routing at submission (original assignee from the
+  reassignment audit row; the ASSIGNED event stores no approver): 1665 / 1665; current assignee 1664 / 1665 in the
+  breakdown and note. AMB-CP-03: high-priority = open requests only (read_repository, dashboard, caption, KPI test,
+  docs): 23 + 37 = 60.
+- Clean state: `alembic downgrade base`, then scripts/run_all.ps1 (new): migrate, generate --load, validation, both
+  comparisons, reproducibility, metrics, pytest. First attempt failed: PowerShell 5.1 turned alembic INFO lines on
+  stderr into a NativeCommandError under "Stop"; fixed (Continue + exit-code checks). Second run: ALL STEPS PASSED.
+  Fingerprint 60d8e077...f601 = committed data/manifest.json (file unchanged).
+- Live check on free ports (8000 / 8501 were held by older servers started 10:26, left running): API 8010 /docs 200,
+  version 1.0.0, /dashboard/metrics employees 400, leave 800, claims 1000, pending 23, high-priority 60; dashboard
+  8511 /_stcore/health 200 ok; both stopped.
+- Docs: docs/12_final_evaluation.md (real output), docs/16 API guide, 17 configuration reference, 18 troubleshooting,
+  19 limitations; docs/02 section 9 acceptance matrix (MET except 11, 12, 16 PARTIAL); docs/14 section 9; README
+  rewritten; docs/08, 09, 13 updated. Version 1.0.0 (pyproject.toml, API).
+- Secret scan: no tracked .env / credentials / keys; .env and data/processed/ ignored; .env.example has empty
+  JWT_SECRET and GROQ_API_KEY, DB passwords are "change-me-*" placeholders; only test-only synthetic values in
+  tests/api/conftest.py. Largest tracked file data/ground_truth/ground_truth.json (1.5 MB).
+
+REAL results: see docs/12 (generate --load, validation 22 / 22 PASS, leave 800 AGREE, expense 1000 AGREE,
+reproducibility 76 / 76, metrics) and the final pytest below.
+
+Final pytest -q: 529 passed, 1 warning (starlette DeprecationWarning) in 75.14s; ruff F,E9: All checks passed.
+Open: MIT LICENSE proposed, not added; tag v1.0.0 and push wait for the owner.
 
 ## Completion pass record (2026-10-29)
 

@@ -103,3 +103,35 @@ alembic upgrade head              # once: migrations 0003 and 0004 add the analy
 Two windows by hand: `uvicorn src.api.main:create_app --factory --port 8000`, then
 `streamlit run src/dashboard/app.py`. macOS / Linux: the same two commands in two terminals. Details:
 docs/13_dashboard_guide.md.
+
+## 9. One command sequence: prepared PostgreSQL to a verified system (Phases 11 + 12)
+
+Once per machine: PostgreSQL 16 running; `copy .env.example .env` and fill in the passwords and JWT_SECRET;
+`.\scripts\init_local_db.ps1 -SuperuserPassword "<postgres password>"` (or `docker compose up -d`); the venv:
+`python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -r requirements.txt`.
+
+Then:
+
+```powershell
+.\scripts\run_all.ps1          # alembic upgrade head, generate --load, validation, both comparisons,
+                               # reproducibility check, metrics, pytest; stops at the first failing step
+.\scripts\start_dashboard.ps1  # API (http://localhost:8000/docs) in a new window, dashboard at http://localhost:8501
+```
+
+macOS / Linux (venv active, `cp .env.example .env`, roles via `docker compose up -d`):
+
+```sh
+alembic upgrade head
+python -m src.data.generate --seed 20261022 --employees 400 --leave-requests 800 --expense-claims 1000 --load
+python -m src.validation
+python -m src.evaluation.leave_service_vs_oracle
+python -m src.evaluation.expense_service_vs_oracle
+sh scripts/reproducibility_check.sh
+python -m src.evaluation.metrics
+pytest -q
+uvicorn src.api.main:create_app --factory --port 8000 &   # then, in another terminal:
+streamlit run src/dashboard/app.py
+```
+
+To start from an empty schema first: `alembic downgrade base` (drops ops and ground_truth in lea_dev). Real output
+of a full run: docs/12_final_evaluation.md.

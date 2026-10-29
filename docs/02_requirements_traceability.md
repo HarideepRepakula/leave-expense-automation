@@ -364,3 +364,37 @@ Open ambiguities (not conflicts) are listed with proposed defaults in docs/09 se
 | 18 | Repeated submission or processing attempt | S18 | EC-18 | idempotency_record table |
 
 Amendment-driven additions beyond spec section 11: S19 / EC-19 no valid approval path, S20 / EC-20 rule conflict, S21 / EC-21 budget exceeded, S22 / EC-22 overlap with pending leave, S23 / EC-23 medical certificate, S24 / EC-24 delegated route, S25 / EC-25 processing failure, S26 currency mismatch (validation check from spec 13.2, no separate EC row), boundary cases BC-01..BC-10.
+
+## 9. Acceptance matrix (spec section 25), status at release 1.0.0 (2026-10-29)
+
+Evidence = a test file in tests/ or a real output in docs/12_final_evaluation.md (run of scripts/run_all.ps1,
+529 tests passed). Status: MET, PARTIAL (with the reason), DEFERRED.
+
+| # | Criterion | Status | Evidence | Reason if not MET |
+|---|---|---|---|---|
+| 1 | Database schema is executable | MET | tests/db/test_roles_and_migration_cycle.py (downgrade base, upgrade head 0004); run_all: alembic upgrade head from an empty lea_dev | |
+| 2 | Required entities and relationships present | MET | tests/db/test_schema_entities.py, tests/test_dictionary_matches_models.py; V-FK-01 | |
+| 3 | Baseline data volumes correct | MET | tests/data/test_generator_baseline.py; docs/12 section 1 (400 / 800 / 1000) | |
+| 4 | IDs follow the documented conventions | MET | tests/db/test_id_and_enum_constraints.py; V-PK-01, V-ID-01 | |
+| 5 | Primary and foreign keys validate | MET | M1 0 / 66090, M2 0 / 92252 (docs/12) | |
+| 6 | Leave balances reconcile | MET | tests/unit/test_leave_balance.py, tests/db/test_leave_balance_and_overlap.py; V-ARITH-05 (1909 balances) | |
+| 7 | Business-day calculations work | MET | tests/unit/test_business_days.py, tests/unit/test_calendar_and_accrual.py; V-ARITH-06 | |
+| 8 | Expense totals reconcile with lines | MET | tests/unit/test_expense_validation.py, tests/db/test_expense_claim_constraints.py; V-ARITH-01..03 | |
+| 9 | Approval routes follow configured policies | MET | tests/unit/test_approval_routing.py; M5 1665 / 1665 at submission; both oracle comparisons 0 DISAGREE | |
+| 10 | Self-approval is prevented | MET | tests/unit/test_approval_decisions.py, tests/db/test_approval_decisions_db.py, tests/api/test_api.py (403 SELF_APPROVAL); V-WF-02 | |
+| 11 | Unauthorized approvals rejected or flagged | PARTIAL | guards tested in tests/unit/test_approval_decisions.py and tests/db/test_approval_decisions_db.py (BLOCKED UNAUTHORIZED_APPROVER); M9 supplement 0 accepted attempts fail the re-check | the S11 / S12 dataset plants are deferred (8B-2), so M9 is not measurable on the dataset |
+| 12 | Required edge cases represented and labelled | PARTIAL | tests/data/test_anomalies_and_ground_truth.py; 41 scenarios, 1100 labels, 40 boundary cases | S11, S12, S18 (and resubmission / cancellation rounds) not in the dataset: actual_count NULL (8B-2 deferred) |
+| 13 | Ground truth isolated from operational input | MET | tests/test_ground_truth_isolation.py, tests/test_reference_independence.py, tests/dashboard/test_dashboard.py (roles and imports) | |
+| 14 | Reimbursements only for eligible, finally approved claims | MET | tests/db/test_reimbursement_constraints.py, tests/unit/test_reimbursement_and_audit.py; M12 0 / 902; V-WF-03 | |
+| 15 | Duplicate reimbursement prevented | MET | tests/db/test_reimbursement_constraints.py, tests/api/test_api.py (409); M11 8 / 8 | |
+| 16 | Audit history preserves state transitions | PARTIAL | tests/db/test_immutability_triggers.py, tests/db/test_reimbursement_and_audit_db.py; 12288 audit events, V-LIFE-01 | no tamper-evident hash chain (DEC-P8-10); ledger postings have no audit_event rows (DEC-P8-09); resubmission / cancellation transitions not in the dataset (8B-2) |
+| 17 | Fixed-seed generator reproducible | MET | tests/data/test_generator_reproducibility.py; reproducibility_check 76 / 76, M13 100% | |
+| 18 | Validation metrics from actual results | MET | tests/evaluation/test_metrics.py; data/validation/evaluation.{csv,json,md}; docs/12 | |
+| 19 | The API works | MET | tests/api/test_api.py, test_read_routes.py, test_explanation.py; live start-up check (PROGRESS.md) | |
+| 20 | The dashboard works | MET | tests/dashboard/test_dashboard.py (7 pages, KPI vs database); live start-up check | leave utilisation not shown (AMB-CP-02, known limitation) |
+| 21 | Automated tests run successfully | MET | pytest 529 passed (docs/12, PROGRESS.md) | |
+| 22 | Documentation explains how to reproduce | MET | README.md, docs/14 section 9, scripts/run_all.ps1, docs/11 | |
+
+Incomplete items (spec 25: listed explicitly): 11, 12 and 16 are PARTIAL for the reasons above; nothing is DEFERRED
+as a whole. Note: the earlier rows of this file name the PLANNED test files of Phase 1; the files above are the
+ones that exist.

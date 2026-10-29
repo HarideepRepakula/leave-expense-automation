@@ -188,6 +188,10 @@ Choices made when implementing section 3 (DEC-CP-04..07, docs/09 section 16):
 
 - M4, M16, M17 headline = the figure over requests WITHOUT a planted anomaly (a planted label with expected_detection
   DETECT on the request); the all-requests (business) figure is in the breakdown.
+- M5 = routing AT SUBMISSION (owner decision AMB-CP-01): a reassigned step counts with its original assignee,
+  taken from the preserved reassignment audit row. The current-assignee figure is reported next to it (dev dataset:
+  100% at submission, 99.94% current assignee; the difference is EXP-2025-000483, reassigned under AMB-P7B-11 after
+  the approver's employment ended, a later documented event, not a routing error).
 - M5 population = requests that reached routing (a PENDING_APPROVAL status event, or stored steps) plus requests
   whose expectation is NO_VALID_APPROVAL_PATH / RULE_CONFLICT. record_expectation.expected_route is also filled for
   requests stopped before routing (escalated, returned or rejected at validation); those are left out, as section 3

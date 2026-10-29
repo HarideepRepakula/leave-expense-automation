@@ -124,7 +124,8 @@ EXPECTATIONS = sa.text("""
     SELECT record_type, record_id, expected_route, expected_exception_codes FROM ground_truth.record_expectation
     WHERE record_type IN ('LEAVE', 'EXPENSE')""")
 STEPS = sa.text("""
-    SELECT coalesce(s.leave_request_id, s.expense_claim_id) AS request_id, s.sequence_no, s.required_level,
+    SELECT coalesce(s.leave_request_id, s.expense_claim_id) AS request_id, s.approval_step_id, s.sequence_no,
+           s.required_level,
            s.approver_employee_id, s.delegated_from_employee_id, s.covered_levels, s.step_status, s.assigned_at,
            s.decision_at
     FROM ops.approval_step s
@@ -132,6 +133,10 @@ STEPS = sa.text("""
     LEFT JOIN ops.expense_claim c ON c.expense_claim_id = s.expense_claim_id
     WHERE s.submission_round = coalesce(l.current_round, c.current_round)
     ORDER BY request_id, s.sequence_no""")
+REASSIGNMENTS = sa.text("""
+    SELECT entity_id, calculated_values->>'from' FROM ops.audit_event
+    WHERE entity_type = 'approval_step' AND calculated_values->>'from' IS NOT NULL
+    ORDER BY occurred_at, event_id""")
 STATUS_EVENTS = sa.text("""
     SELECT coalesce(leave_request_id, expense_claim_id) AS request_id, previous_status, new_status, occurred_at
     FROM ops.request_status_event ORDER BY request_id, occurred_at, event_id""")
@@ -226,9 +231,38 @@ def _expected_route(route: list[dict]) -> list[tuple]:
             for x in route]
 
 
-def routing(expectations: list[dict], steps_by_req: dict, exc_codes: dict, routed: set[str]) -> dict:
+def routing(expectations: list[dict], steps_by_req: dict, exc_codes: dict, routed: set[str],
+            original: dict[str, str]) -> dict:
     """routed = requests that reached routing (a PENDING_APPROVAL status event, or stored steps for legacy rows);
-    the expected route is also filled for requests stopped before routing, which docs/08 M5 leaves out."""
+    the expected route is also filled for requests stopped before routing, which docs/08 M5 leaves out.
+
+    Headline = routing AT SUBMISSION (AMB-CP-01): a reassigned step counts with its original assignee, taken from
+    the preserved reassignment audit row (`original`: step id -> first 'from'). The current-assignee figure is in
+    the breakdown; a reassignment is a later documented event (AMB-P7B-11), not a routing error."""
+    at_submission = {rid: [dict(s, approver_employee_id=original.get(s["approval_step_id"],
+                                                                     s["approver_employee_id"])) for s in steps]
+                     for rid, steps in steps_by_req.items()}
+    head = _route_accuracy(expectations, at_submission, exc_codes, routed)
+    current = _route_accuracy(expectations, steps_by_req, exc_codes, routed)
+    breakdown = head["breakdown"] + [
+        row("current assignee", "all", current["correct"], current["population"],
+            ratio(current["correct"], current["population"]))]
+    breakdown += [row("current assignee: differs (reassigned later, AMB-P7B-11)", rid, None, None, None, "record")
+                  for rid in current["wrong"][:50]]
+    return metric("M5", "Approval routing accuracy",
+                  "requests that reached routing (PENDING_APPROVAL at some point, or stored steps), plus requests "
+                  "whose expectation is a routing exception code (NO_VALID_APPROVAL_PATH, RULE_CONFLICT)",
+                  numerator=head["correct"], denominator=head["population"],
+                  value=ratio(head["correct"], head["population"]), breakdown=breakdown,
+                  note="routing at submission: stored current-round approval steps (level, covered levels, "
+                       "approver as first assigned, delegated-from) vs the expected route from the independent "
+                       "reference calculation; for S19 / S20 the expected routing exception code and no steps. "
+                       f"Current-assignee figure: {display(ratio(current['correct'], current['population']), 'ratio')}"
+                       "; the difference is reassignment after an approver's employment ended (AMB-P7B-11), a later "
+                       "documented event, not a routing error")
+
+
+def _route_accuracy(expectations: list[dict], steps_by_req: dict, exc_codes: dict, routed: set[str]) -> dict:
     population = correct = level_correct = 0
     by_type: Counter = Counter()
     by_type_ok: Counter = Counter()
@@ -256,13 +290,7 @@ def routing(expectations: list[dict], steps_by_req: dict, exc_codes: dict, route
     breakdown.append(row("secondary", "level-only accuracy", level_correct, population,
                          ratio(level_correct, population)))
     breakdown += [row("disagreement", rid, None, None, None, "record") for rid in wrong[:50]]
-    return metric("M5", "Approval routing accuracy",
-                  "requests that reached routing (PENDING_APPROVAL at some point, or stored steps), plus requests "
-                  "whose expectation is a routing exception code (NO_VALID_APPROVAL_PATH, RULE_CONFLICT)",
-                  numerator=correct, denominator=population, value=ratio(correct, population), breakdown=breakdown,
-                  note="stored current-round approval steps (level, covered levels, approver, delegated-from) vs "
-                       "the expected route from the independent reference calculation; for S19 / S20 the "
-                       "expected routing exception code and no steps")
+    return {"population": population, "correct": correct, "wrong": wrong, "breakdown": breakdown}
 
 
 def anomaly_metrics(detected: set, labels: list[tuple]) -> list[dict]:
@@ -512,6 +540,9 @@ def compute(engine: sa.Engine, validation_dir: Path = VALIDATION_DIR, as_of: dat
         events: dict[str, list[dict]] = defaultdict(list)
         for e in conn.execute(STATUS_EVENTS).mappings():
             events[e["request_id"]].append(dict(e))
+        original: dict[str, str] = {}
+        for step_id, first in conn.execute(REASSIGNMENTS):
+            original.setdefault(step_id, first)
         detected = {(r, c) for r, c in conn.execute(DETECTIONS_IN_DB)}
         m9, m11, m12 = unauthorized(conn), duplicate_reimbursement(conn), eligibility(conn)
     path = validation_dir / "detections.csv"
@@ -525,7 +556,7 @@ def compute(engine: sa.Engine, validation_dir: Path = VALIDATION_DIR, as_of: dat
     metrics.append(compliance(reqs, exc, planted))
     routed = set(steps_by_req) | {rid for rid, evs in events.items()
                                   if any(e["new_status"] == "PENDING_APPROVAL" for e in evs)}
-    metrics.append(routing(expectations, steps_by_req, exc_codes, routed))
+    metrics.append(routing(expectations, steps_by_req, exc_codes, routed, original))
     metrics += anomaly_metrics(detected, labels)
     metrics.append(m9)
     metrics.append(subset_detection("M10", "Duplicate receipt detection rate", detected, labels,

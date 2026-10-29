@@ -50,7 +50,7 @@ login goes to POST /auth/login (simulated authentication, amendment F2). Who see
 
 Overview (completion pass) also shows total employees, escalated and returned counts (the "Pending approval" caption
 says PENDING_APPROVAL only), approved, rejected, requests with a policy exception and "High-priority issues" =
-requests ESCALATED_FOR_REVIEW or with a HARD exception (current round) + OPEN reimbursement processing failures
+OPEN requests (not approved, rejected or cancelled) ESCALATED_FOR_REVIEW or with a HARD exception (current round) + OPEN reimbursement processing failures
 (DEC-CP-03). For analysts the Requests detail comes from GET /requests/{id}/investigation and adds the applicable
 policy, approval attempts, reimbursements and audit events. Ages are counted at the dataset as-of date.
 
