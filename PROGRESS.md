@@ -1,8 +1,8 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 8A (reimbursement and audit services; dataset unchanged)
-Status: 8A COMPLETE. Phase 8B (dataset) is planned in docs/09 13.4 and waits for the owner's OK on that plan.
-  Then "APPROVED PHASE 8" after 8B.
+Current phase: Phase 8B-1 (reimbursements, payment runs, S13, S25, audit_event export)
+Status: 8B-1 COMPLETE. Awaiting "APPROVED 8B-1"; then 8B-2 (resubmissions, cancellations, S11/S12, S18, migration
+  0003 record_round_expectation). "APPROVED PHASE 8" after 8B-2.
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
