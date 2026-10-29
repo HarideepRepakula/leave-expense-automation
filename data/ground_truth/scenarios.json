@@ -175,7 +175,7 @@
     "scenario_id": "S12"
   },
   {
-    "actual_count": null,
+    "actual_count": 8,
     "description": "Duplicate reimbursement attempt (rows built in Phase 8)",
     "issue_type": "DUPLICATE_REIMBURSEMENT_ATTEMPT",
     "planned_count": 8,
@@ -273,7 +273,7 @@
     "scenario_id": "S24"
   },
   {
-    "actual_count": null,
+    "actual_count": 37,
     "description": "Technical payment failure (Phase 8; 5 percent of first payment attempts, count not fixed in advance)",
     "issue_type": "PROCESSING_FAILURE",
     "planned_count": 0,

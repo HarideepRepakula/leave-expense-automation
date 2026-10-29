@@ -541,3 +541,29 @@ validation report; detections.csv only if a cancelled claim was part of a detect
 policy, user, rule and calendar file.
 Questions for the owner: (a) the plan as a whole; (b) cancellation selection and timing (item 5); (c) S18 / SUBMIT
 idempotency rows (AMB-P8-04); (d) ledger-posting audit rows (AMB-P8-03); (e) hash chain at the end of 8B (DEC-P8-07).
+
+Owner decisions 2026-10-29: plan approved, with every planted record keeping its label and round-1 expected outcome
+and per-round checks at 0 DISAGREE; cancellation approved, never on planted or boundary records; S18 SUBMIT
+idempotency rows in 8B; AMB-P8-01..05 defaults accepted; 8B split into 8B-1 (items 1, 2, 6, 8: reimbursements,
+payments, S13, S25, audit export) and 8B-2 (items 3, 4, 5, S18, per-round ground truth with migration 0003).
+
+### 13.5 Phase 8B-1 additions (applied)
+
+| ID | Assumption / decision |
+|---|---|
+| DEC-P8-09 | Ledger postings are NOT audited (owner 2026-10-29, AMB-P8-03): leave_balance_transaction and cost_center_transaction are already append-only tables (trigger + grants) with correlation ids, so an audit row per posting would duplicate them. |
+| DEC-P8-10 | Audit hash chain (DEC-20, DEC-P8-07) DEFERRED: optional, to be revisited in Phase 12. Triggers and role grants remain the immutability mechanism. |
+| ASM-P8B-01 | ASSUMPTION (illustrative synthetic), payment run (BR-RMB-03, ASM-035; config/generation.yaml payments): start and settle at 17:00 UTC on the n-th business day of the claimant's country counted from the day after the final approval, n = keyed draw (claim id, "DELAY") in [1, 5] on the reserved `payments` stream; the first attempt fails when the keyed draw (claim id, "FAIL") in [0, 99] is < 5; the retry is 2 business days later and succeeds. Payment reference PAY-<RMB id>-<attempt>. Runs after the as-of instant do not happen. No existing draw moves (the stream was unused). |
+| ASM-P8B-02 | ASSUMPTION, S13: the planted second CREATE is made by SYSTEM (manual path, key SHA-256(SYSTEM, CREATE_REIMBURSEMENT, claim)) one hour after the reimbursement was created, on the 8 lowest-id claims approved at as-of that carry no other planted label and are no boundary record (selected in S9 from the oracle; S6 receives the ids as a plant list). Result: BLOCKED DUPLICATE_REIMBURSEMENT. |
+| ASM-P8B-03 | S25 labels (scenario S25, issue PROCESSING_FAILURE, record = the claim) are not planted: they come from the designated stochastic payments stream. The oracle derives them with its own keyed draws; S9 counts them as the S25 actual (planned 0, count not fixed in advance). |
+| DEC-P8-11 | The oracle models the payment run itself (keyed draws re-implemented) and its budget: a COMPLETED payment of a capped claim releases total - approved_amount at the completion instant (BR-BUD-05). The expense comparison also compares each claim's active reimbursement (status at as-of, amount, currency) between services, oracle and dataset. |
+
+Result at seed 20261022 / 400 (before = commit d9eeca9, after = 8B-1):
+- Scenario counts: every planted and boundary count unchanged; S13 actual none -> 8 (planned 8); S25 actual none
+  -> 37 (planned 0); natural counts unchanged: S04 62, S14 788, natural BUDGET_EXCEEDED 1 (the 8 capped-claim
+  releases did not move any later budget check).
+- New tables: reimbursement 902 (at as-of COMPLETED 893, ELIGIBLE 9); reimbursement_attempt 2,770 (ACCEPTED 1,832,
+  COMPLETED 893, PAYMENT_FAILED 37, BLOCKED 8); processing_failure 37; audit_event 12,288.
+- Changed counts: idempotency_record 2,563 -> 3,501 (+930 PROCESS_PAYMENT, +8 CREATE_REIMBURSEMENT);
+  cost_center_transaction 1,041 -> 1,942 (+893 ACTUAL, +8 RELEASE at completion of the 8 capped S07a claims).
+  Labels 1,055 -> 1,100 (+8 S13 planted, +37 S25). Every other table count and every status at as-of unchanged.

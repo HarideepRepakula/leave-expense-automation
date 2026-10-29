@@ -111,7 +111,7 @@ def run_simulation(tables: dict[str, list[dict]], config_dir: Path, seed: int | 
     streams = RngStreams(seed, cfg["generation"]["streams"])
     calendar = HolidayCalendar.from_rows(cfg["calendar"]["weekend_days"], tables["country_holiday"])
     leave, expense = simulate(cfg, tables, calendar, lambda k, lo, hi: streams.keyed_integers("delays", k, lo, hi),
-                              as_of)
+                              as_of, lambda k, lo, hi: streams.keyed_integers("payments", k, lo, hi))
     return leave, expense, seed, as_of
 
 

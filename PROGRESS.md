@@ -43,6 +43,39 @@ Phase 8 split (2026-10-29, owner allowed a split): 8A = carried-over items 1-2, 
   processing_failure, cancellation service, tests, docs, dataset plan; 8B = every dataset change (AMB-P7B-02/03/04,
   S7 / S8 stages, S11-S13, S25, V-ARITH-04 and V-WF-03 on real rows), after the owner's OK on docs/09 13.4.
 
+Phase 8A: accepted by the owner 2026-10-29 (commit d9eeca9); 8B plan approved with conditions (docs/09 13.4).
+
+## Phase 8B-1 record
+
+Scope: stage S7 in the S6 replay (reimbursement at final approval for every claim APPROVED at as-of; payment runs
+on the reserved `payments` stream: 5 percent first-attempt failures with processing_failure rows and a retry, S25;
+ACTUAL + RELEASE at completion); S13 (8 planted second CREATEs -> BLOCKED DUPLICATE_REIMBURSEMENT); S8 export of
+audit_event; four new exported / loaded tables. Oracle: own payment model and capped-excess budget release; the
+expense comparison also compares each reimbursement. Ground truth: S13 planted labels, S25 labels from the oracle.
+No ground_truth schema change, no resubmission / cancellation / S11 / S12 / S18 (8B-2). Services import nothing from
+src/reference; ground truth isolated (tests pass). Ledger-posting audit skipped (DEC-P8-09); hash chain deferred
+(DEC-P8-10).
+
+Files changed: config/generation.yaml (payments); src/services/workflow_simulation.py; src/data/{dataset,generate}.py;
+src/data/stages/{outcomes,ground_truth}.py; src/reference/oracle.py; src/evaluation/{leave,expense}_service_vs_oracle.py;
+tests/data/{test_outcomes_on_dataset,test_anomalies_and_ground_truth,test_expense_services_on_dataset}.py;
+docs/09 (13.4 decisions, 13.5), docs/15; PROGRESS.md; data/manifest.json, data/ground_truth/{anomaly_labels.csv,
+scenarios.json,ground_truth.json}. No migration, no new packages.
+
+REAL results (2026-10-29):
+- generate --load: exit 0; every lea_dev count = generated (reimbursement 902, reimbursement_attempt 2770,
+  processing_failure 37, audit_event 12288, idempotency_record 3501, cost_center_transaction 1942); ground_truth
+  1800 / 1100 / 40 / 41. Fingerprint 60d8e0770f00b2ee6c6495ad7c19f4a7ff5a210ec1b9a56d0e9a34ac6eb3f601 (was 28ece855...).
+- Validation: 22 checks, 0 failed, 0 not applicable; V-ARITH-04 PASS 902, V-WF-03 PASS 902; M1 0/66090,
+  M2 0/92252, M3 7883/7883.
+- Leave comparison 800 AGREE / 0 DISAGREE; expense 1000 AGREE / 0 DISAGREE (incl. reimbursement status and amount).
+- reproducibility_check.ps1: 76 of 76 identical, RESULT: REPRODUCIBLE, exit 0.
+- pytest -q: 488 passed in 87.31s (482 + 6 new). ruff: All checks passed. Note: an earlier full run in the same
+  session ended its output with a runpy traceback and no visible summary line (cause not captured); the rerun above
+  is clean.
+- Scenario counts before -> after: all planted and boundary counts unchanged; S13 none -> 8; S25 none -> 37;
+  natural S04 62, S14 788, BUDGET_EXCEEDED 1 unchanged (docs/09 13.5).
+
 ## Phase 8A record
 
 Scope implemented: src/services/reimbursement_service.py (row at final approval inside the approval operation, only

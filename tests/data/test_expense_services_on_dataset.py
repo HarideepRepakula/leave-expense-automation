@@ -32,7 +32,7 @@ def test_expense_detections_equal_the_expense_labels(gen):
     found = {(d.record_id, d.exception_code) for d in g.detections if d.record_type == "EXPENSE"}
     expected = {(r["affected_record_id"], r["issue_type"]) for r in g.truth.tables["anomaly_label"]
                 if r["affected_record_type"] == "EXPENSE" and r["expected_detection"] == "DETECT"
-                and r["scenario_id"] != "S19-E"}
+                and r["scenario_id"] not in ("S19-E", "S13", "S25")}   # S13 / S25: attempt and failure rows
     assert found == expected
 
 

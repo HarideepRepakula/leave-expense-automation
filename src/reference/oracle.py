@@ -101,6 +101,11 @@ class ReferenceConfig:
         self.as_of_date = asof if isinstance(asof, date) else date.fromisoformat(str(asof))
         self.decision_hour = int(gen["decisions"]["decision_hour_utc"])
         self.delay_ranges = {k: (int(v[0]), int(v[1])) for k, v in gen["decisions"]["delay_business_days"].items()}
+        pay = gen.get("payments")         # Phase 8B-1 (BR-RMB-03, ASM-035)
+        self.payments = None if pay is None else {
+            "delay": (int(pay["delay_business_days"][0]), int(pay["delay_business_days"][1])),
+            "fail_pct": int(pay["first_attempt_failure_percent"]), "retry": int(pay["retry_after_business_days"]),
+            "hour": int(pay["run_hour_utc"])}
 
     @staticmethod
     def _rule(r: dict, default_start) -> dict:
@@ -122,7 +127,9 @@ class Oracle:
         self.cfg = ReferenceConfig(config_dir, rules_override)
         self.t = tables
         root = np.random.SeedSequence(self.cfg.master_seed if seed is None else seed)
-        self.delay_seed = root.spawn(len(self.cfg.streams))[self.cfg.streams.index("delays")]
+        children = root.spawn(len(self.cfg.streams))
+        self.delay_seed = children[self.cfg.streams.index("delays")]
+        self.pay_seed = children[self.cfg.streams.index("payments")]
         self.as_of = datetime.combine(as_of or self.cfg.as_of_date, time(0, 0), tzinfo=timezone.utc)
         role_names = {r["role_id"]: r["role_name"] for r in tables.get("role", [])}
         user_emp = {u["user_id"]: u["employee_id"] for u in tables.get("application_user", [])}
@@ -277,12 +284,44 @@ class Oracle:
                 for x in route]
 
     # --- timing (Phase 7B): when each simulated decision happens -------------------------------------------------
-    def delay(self, key: tuple, kind: str) -> int:
-        lo, hi = self.cfg.delay_ranges[kind]
-        s = self.delay_seed
+    @staticmethod
+    def keyed(s, key: tuple, lo: int, hi: int) -> int:
         words = tuple(int.from_bytes(hashlib.sha256(str(k).encode()).digest()[:8], "big") for k in key)
         child = np.random.SeedSequence(s.entropy, spawn_key=tuple(s.spawn_key) + words, pool_size=s.pool_size)
         return int(np.random.Generator(np.random.PCG64(child)).integers(lo, hi + 1))
+
+    def delay(self, key: tuple, kind: str) -> int:
+        return self.keyed(self.delay_seed, key, *self.cfg.delay_ranges[kind])
+
+    def nth_business_day_at(self, start: date, n: int, country: str, hour: int) -> datetime:
+        d = start
+        while True:
+            if self.is_business_day(d, country):
+                n -= 1
+                if n == 0:
+                    return datetime.combine(d, time(hour), tzinfo=timezone.utc)
+            d += timedelta(days=1)
+
+    def payment(self, x: Expectation, emp_id: str) -> None:
+        """Phase 8B-1 (ASM-035, ASM-P8B-01): the payment run of an approved claim, at run hour on the n-th business
+        day (claimant's country) from the day after approval; a failed first attempt is retried after `retry`
+        business days and succeeds; runs after as-of do not happen. Sets facts reimbursement_status_at_asof,
+        completed_at (or None) and payment_failed (a first attempt failed before as-of: S25)."""
+        cfg, cid, country = self.cfg.payments, x.record_id, self.emps[emp_id]["country"]
+        x.facts.update(reimbursement_status_at_asof="ELIGIBLE", completed_at=None, payment_failed=False)
+        if cfg is None:
+            return
+        run = self.nth_business_day_at(x.facts["approved_at"].date() + timedelta(days=1),
+                                       self.keyed(self.pay_seed, (cid, "DELAY"), *cfg["delay"]), country, cfg["hour"])
+        if run > self.as_of:
+            return
+        if self.keyed(self.pay_seed, (cid, "FAIL"), 0, 99) >= cfg["fail_pct"]:
+            x.facts.update(reimbursement_status_at_asof="COMPLETED", completed_at=run)
+            return
+        x.facts.update(reimbursement_status_at_asof="FAILED", payment_failed=True)
+        retry = self.nth_business_day_at(run.date() + timedelta(days=1), cfg["retry"], country, cfg["hour"])
+        if retry <= self.as_of:
+            x.facts.update(reimbursement_status_at_asof="COMPLETED", completed_at=retry)
 
     def decided_at(self, assigned: datetime, kind: str, key: tuple, decider: str) -> datetime:
         n = max(1, self.delay(key, kind))
@@ -337,6 +376,7 @@ class Oracle:
                 key = (x.record_id, 1, step["level"], approver)
             if t > self.as_of:
                 return "PENDING_APPROVAL", None
+        x.facts["approved_at"] = t
         return "APPROVED", None
 
     @staticmethod
@@ -630,11 +670,18 @@ class Oracle:
                 x.approved_amount = sum((min(ln["line_amount"], pols[ln["expense_line_id"]]["per_line_limit"])
                                          for ln in cl), ZERO).quantize(CENT)   # BR-EX-14
                 x.eligible = x.approved_amount > 0
+                if x.eligible:
+                    self.payment(x, c["employee_id"])
             else:
                 x.eligible = False
             validation_releases = {self.cfg.severity[k] for k in codes} & {"HARD", "CORRECTABLE"}
             if budget is not None and not validation_releases:          # BR-BUD-02/04 (AMB-P6-01)
-                budget_held.setdefault(bkey, []).append((total, released_at))
+                done = x.facts.get("completed_at")
+                if done is not None and x.approved_amount < total:      # BR-BUD-05: the excess is released
+                    budget_held.setdefault(bkey, []).extend([(x.approved_amount, None), (total - x.approved_amount,
+                                                                                         done)])
+                else:
+                    budget_held.setdefault(bkey, []).append((total, released_at))
             for h in hashes:
                 seen_hashes.setdefault(h, []).append(c["employee_id"])
             signatures.setdefault(c["employee_id"], set()).add(signature)

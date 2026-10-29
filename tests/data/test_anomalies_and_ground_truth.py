@@ -46,8 +46,10 @@ def test_full_scale_planted_counts_equal_plan(full_gen):
 
 def test_attempt_scenarios_are_listed_but_not_yet_built(full_gen):
     s = _scenarios(full_gen)
-    for sid in ("S11", "S12", "S13", "S18", "S25"):
-        assert s[sid]["actual_count"] is None, sid               # rows arrive with Phases 7-8
+    for sid in ("S11", "S12", "S18"):
+        assert s[sid]["actual_count"] is None, sid               # rows arrive with Phase 8B-2
+    assert s["S13"]["actual_count"] == s["S13"]["planned_count"] == 8      # Phase 8B-1
+    assert s["S25"]["actual_count"] > 0 and s["S25"]["planned_count"] == 0  # count not fixed in advance
 
 
 def test_one_planted_scenario_per_record(gen):
@@ -62,7 +64,9 @@ def test_labels_agree_with_record_expectations(gen):
     expectations = {(r["record_type"], r["record_id"]): r for r in g.truth.tables["record_expectation"]}
     for lab in g.truth.tables["anomaly_label"]:
         rec = expectations[(lab["affected_record_type"], lab["affected_record_id"])]
-        if lab["expected_detection"] == "DETECT":
+        if lab["scenario_id"] in ("S13", "S25"):        # attempt / processing_failure rows, not exception codes
+            assert rec["expected_final_status_at_asof"] == "APPROVED" and rec["expected_reimbursement_eligibility"]
+        elif lab["expected_detection"] == "DETECT":
             assert lab["issue_type"] in rec["expected_exception_codes"], lab["label_id"]
         elif lab["is_planted"]:
             assert rec["expected_exception_codes"] == [], lab["label_id"]   # planted controls are clean

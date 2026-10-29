@@ -70,6 +70,7 @@ class GroundTruthDisagreement(RuntimeError):
 class GroundTruth:
     tables: dict[str, list[dict]]
     expectations: dict[tuple[str, str], Expectation]
+    s13: tuple[str, ...] = ()          # claims that get the planted second CREATE in S7 (Phase 8B-1)
 
 
 def _check(subject: str, expected: frozenset[str], x: Expectation, checks: dict, problems: list[str]) -> None:
@@ -102,6 +103,7 @@ def planned_counts(cfg: dict, p: GenParams) -> dict[str, int]:
     out.update({"S01b": nl(c["S01b"]), "S04": nl(c["S04_min_total"]), "S14-L5": ne(c["S14-L5"]),
                 "S24": nl(c["S24"]["leave"]) + ne(c["S24"]["expense"]), "S14": ne(150)})
     out.update({k: nl(v) for k, v in a["attempts"].items()})
+    out["S13"] = ne(a["attempts"]["S13"])          # reimbursements are expense records (Phase 8B-1)
     out.update(a["fixtures"])                      # fixed fixture files, not scaled
     out["S25"] = 0
     b = cfg["generation"]["boundaries"]
@@ -159,6 +161,27 @@ def build_ground_truth(cfg: dict, p: GenParams, dataset: dict[str, list[dict]], 
         if len(x.required_levels) >= 2 and ("S14-L5", *key) not in planted_keys:
             labels.append(_control("S14", key, f"natural: route {'+'.join(x.required_levels)}"))
 
+    # Phase 8B-1: S13 (planted second CREATE on the lowest-id reimbursed claims that carry no other plant and are
+    # no boundary record) and S25 (first payment attempt failed before as-of; payments stream, not planted).
+    taken = {k for k in planted} | {(r["record_type"], r["record_id"]) for r in bc_rows}
+    reimbursed = [k for k, x in sorted(exp.items()) if k[0] == "EXPENSE" and x.eligible and x.final_status == "APPROVED"]
+    s13 = tuple(k[1] for k in reimbursed if k not in taken)[:planned_counts(cfg, p)["S13"]]
+    for cid in s13:
+        labels.append({
+            "scenario_id": "S13", "affected_record_type": "EXPENSE", "affected_record_id": cid,
+            "issue_type": EXTRA_ISSUES["S13"], "label": "planted S13", "expected_detection": "DETECT",
+            "expected_workflow_behaviour": "second CREATE BLOCKED DUPLICATE_REIMBURSEMENT; one active reimbursement",
+            "injection_reason": "manual CREATE one hour after the reimbursement created at final approval",
+            "is_planted": True})
+    for k in reimbursed:
+        if exp[k].facts.get("payment_failed"):
+            labels.append({
+                "scenario_id": "S25", "affected_record_type": "EXPENSE", "affected_record_id": k[1],
+                "issue_type": EXTRA_ISSUES["S25"], "label": "technical payment failure", "expected_detection": "DETECT",
+                "expected_workflow_behaviour": "reimbursement FAILED with a processing_failure row, retried after 2 "
+                                               "business days; the claim stays APPROVED",
+                "injection_reason": "payments stream: first payment attempt failed (5 percent)", "is_planted": False})
+
     labels.sort(key=lambda r: (not r["is_planted"], r["scenario_id"], r["affected_record_type"],
                                r["affected_record_id"], r["issue_type"]))
     for i, r in enumerate(labels, start=1):
@@ -180,7 +203,7 @@ def build_ground_truth(cfg: dict, p: GenParams, dataset: dict[str, list[dict]], 
     for r in labels:
         if r["scenario_id"].startswith("BC-"):
             continue                      # boundary records are counted once, from boundary_case below
-        if r["is_planted"] or r["scenario_id"] in ("S04", "S14"):
+        if r["is_planted"] or r["scenario_id"] in ("S04", "S14", "S25"):
             actual[r["scenario_id"]] = actual.get(r["scenario_id"], 0) + 1
     for r in bc_rows:
         case = r["boundary_type"].split(":")[0]
@@ -193,7 +216,7 @@ def build_ground_truth(cfg: dict, p: GenParams, dataset: dict[str, list[dict]], 
         "planned_count": planned[sid], "actual_count": actual.get(sid),
     } for sid in sorted(planned)]
     return GroundTruth({"record_expectation": records, "anomaly_label": labels, "boundary_case": bc_rows,
-                        "scenario": scenarios}, exp)
+                        "scenario": scenarios}, exp, s13)
 
 
 def _control(scenario: str, key: tuple[str, str], reason: str) -> dict:

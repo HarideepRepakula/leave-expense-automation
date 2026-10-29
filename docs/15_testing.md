@@ -72,3 +72,12 @@ Real output only. PROGRESS.md and the end-of-phase report quote the actual pytes
 - tests/db/test_reimbursement_and_audit_db.py: SqlWorkflow.record_reassignment (carried over from 7B); reimbursement row accepted by the eligibility trigger, RMB / RMA / PFL / AUD ids, payment failure and retry, ACTUAL with committed_amount and actual_amount, SYSTEM idempotency scope; duplicate create blocked by the guard and, in a simulated race, by the partial unique index (savepoint); run_recording_failure (rollback, processing_failure in a second transaction, business errors pass through); cancellation.
 - tests/reference/test_reference_oracle.py::test_status_at_as_of_depends_on_the_departed_approver_reassignment: hand-built oracle case (delays pinned to 1 business day) where the status at as-of is APPROVED without the reassignment and PENDING_APPROVAL with it (carried over from 7B).
 - tests/db/test_leave_submission_db.py: id_sequence now also has the AUD scope (3 audit rows per submission).
+
+## Phase 8B-1 tests
+
+- tests/data/test_outcomes_on_dataset.py: one reimbursement per claim APPROVED at as-of with its approved amount,
+  currency and employee; completed_at only on COMPLETED and before as-of; S13 BLOCKED attempts and S25
+  processing_failure rows equal their ground-truth labels; ACTUAL = approved amount for every completed payment;
+  audit ids follow time; one audit row per request transition.
+- tests/data/test_anomalies_and_ground_truth.py and test_expense_services_on_dataset.py: S13 / S25 counted and
+  excluded from the exception-code and detector comparisons (they are attempt and failure rows).

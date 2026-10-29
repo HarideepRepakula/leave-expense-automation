@@ -30,7 +30,15 @@ from src.services.expense_batch import ExpenseReplay
 
 COLUMNS = ["record_id", "employee_id", "kind", "expected_codes", "actual_codes", "expected_status", "actual_status",
            "oracle_final_status", "actual_status_asof", "dataset_status", "expected_usd", "actual_usd", "expected_approved", "actual_approved",
-           "expected_route", "actual_route", "steps", "result"]
+           "expected_route", "actual_route", "steps", "expected_reimbursement", "actual_reimbursement",
+           "dataset_reimbursement", "result"]
+
+
+def reimbursement_text(rows: list[dict], claim_id: str) -> str:
+    """'<status at as-of> <amount> <currency>' of the claim's active reimbursements ('' when none)."""
+    return "; ".join(f"{b['reimbursement_status']} {b['approved_amount']} {b['currency']}"
+                     for b in sorted(rows, key=lambda b: b["reimbursement_id"])
+                     if b["expense_claim_id"] == claim_id and b["reimbursement_status"] != "CANCELLED")
 
 
 @dataclass
@@ -55,8 +63,13 @@ def compare(tables: dict[str, list[dict]], config_dir: Path, seed: int | None = 
     expected = Oracle(tables, config_dir, seed=seed, as_of=as_of).expenses()
 
     rows = []
+    services_rmb, dataset_rmb = list(replay.store.reimbursements.values()), tables.get("reimbursement", [])
     for c in sorted(tables["expense_claim"], key=lambda c: c["expense_claim_id"]):
         cid, x = c["expense_claim_id"], expected[c["expense_claim_id"]]
+        # Phase 8B-1: one reimbursement exactly for the claims approved at as-of, its status at as-of and amount.
+        exp_rmb = (f"{x.facts['reimbursement_status_at_asof']} {x.approved_amount} {c['currency']}"
+                   if x.eligible else "")
+        act_rmb, ds_rmb = reimbursement_text(services_rmb, cid), reimbursement_text(dataset_rmb, cid)
         res = replay.store.results.get(cid)
         exp_codes, act_codes = set(x.codes), replay.codes(cid)
         exp_route, act_route = expected_route(x), actual_route(res.routing if res else None)
@@ -88,7 +101,9 @@ def compare(tables: dict[str, list[dict]], config_dir: Path, seed: int | None = 
                      "actual_status_asof": asof, "dataset_status": c["workflow_status"],
                      "expected_usd": exp_usd, "actual_usd": act_usd, "expected_approved": exp_appr,
                      "actual_approved": act_appr, "expected_route": exp_route, "actual_route": act_route,
-                     "steps": steps, "result": "AGREE" if same and steps_ok else "DISAGREE"})
+                     "steps": steps, "expected_reimbursement": exp_rmb, "actual_reimbursement": act_rmb,
+                     "dataset_reimbursement": ds_rmb,
+                     "result": "AGREE" if same and steps_ok and exp_rmb == act_rmb == ds_rmb else "DISAGREE"})
     return Comparison(rows, replay)
 
 

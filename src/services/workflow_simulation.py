@@ -40,6 +40,7 @@ from src.services.approval_service import (
 )
 from src.services.calendar_service import HolidayCalendar
 from src.services.exception_service import ExceptionCatalogue
+from src.services.reimbursement_service import settle_payment, start_payment
 
 PROCESS_OWNER = "PROCESS_OWNER"
 YEAR_END, DECISION, SUBMIT = 0, 1, 2          # order of events that share an instant
@@ -60,15 +61,23 @@ class DecisionTiming:
     policy: ProcessOwnerPolicy
     as_of: datetime                                   # nothing happens after this instant
     hour: int = 17
+    payments: Callable[[tuple, int, int], int] | None = None   # keyed draw on the payments stream (Phase 8B-1)
+    payment_cfg: dict | None = None                   # config/generation.yaml payments
 
     @classmethod
     def from_config(cls, generation_cfg: dict, exception_codes_cfg: dict, calendar: HolidayCalendar,
-                    employees: list[dict], process_owners, delays, as_of: datetime) -> "DecisionTiming":
+                    employees: list[dict], process_owners, delays, as_of: datetime,
+                    payments=None) -> "DecisionTiming":
         d = generation_cfg["decisions"]
         return cls(calendar, {e["employee_id"]: e["country"] for e in employees}, delays,
                    {k: (int(v[0]), int(v[1])) for k, v in d["delay_business_days"].items()},
                    tuple(sorted(process_owners)), ProcessOwnerPolicy.from_config(exception_codes_cfg), as_of,
-                   int(d["decision_hour_utc"]))
+                   int(d["decision_hour_utc"]), payments, generation_cfg.get("payments") if payments else None)
+
+    def payment_at(self, after: datetime, n: int, employee_id: str) -> datetime:
+        """run_hour_utc on the n-th business day (the claimant's country) counted from the day after `after`."""
+        day = self.calendar.nth_business_day(after.date() + timedelta(days=1), n, self.countries[employee_id])
+        return datetime.combine(day, time(int(self.payment_cfg["run_hour_utc"])), tzinfo=timezone.utc)
 
     def decision_at(self, assigned_at: datetime, kind: str, key: tuple, decider: str) -> datetime:
         days = max(1, self.delays(key, *self.ranges[kind]))
@@ -160,6 +169,28 @@ class DecisionDriver:
             raise SimulationError(f"{res.request_id}: simulated {res.action} by {res.actor_id} blocked "
                                   f"({res.reason_code})")
         self.decided.append(res)
+        made = res.reimbursement
+        if made is not None and made.new_reimbursement is not None and self.timing.payments is not None:
+            self._schedule_payment(made.reimbursement_id, res.request_id, res.at, 1)
+
+    # --- payment runs (stage S7, Phase 8B-1; BR-RMB-03, ASM-035) -------------------------------------------------
+    def _schedule_payment(self, rmb: str, cid: str, after: datetime, attempt: int) -> None:
+        cfg = self.timing.payment_cfg
+        lo, hi = cfg["delay_business_days"]
+        n = self.timing.payments((cid, "DELAY"), int(lo), int(hi)) if attempt == 1 \
+            else int(cfg["retry_after_business_days"])
+        at = self.timing.payment_at(after, n, self.store.load_request(cid)["employee_id"])
+        self._push(at, cid, lambda at: self._pay(rmb, cid, attempt, at))
+
+    def _pay(self, rmb: str, cid: str, attempt: int, at: datetime) -> None:
+        corr = self._correlation(cid, f"PAY-{attempt}")
+        start_payment(self.store, rmb, at, corr, attempt_no=attempt)
+        failed = attempt == 1 and self.timing.payments((cid, "FAIL"), 0, 99) < \
+            int(self.timing.payment_cfg["first_attempt_failure_percent"])
+        settle_payment(self.store, rmb, at, corr, succeeded=not failed,
+                       payment_reference=None if failed else f"PAY-{rmb}-{attempt}")
+        if failed:
+            self._schedule_payment(rmb, cid, at, attempt + 1)
 
     def _approve(self, rid: str, step: dict, at: datetime) -> None:
         self._check(decide_step(self.store, rid, step["approval_step_id"], step["approver_employee_id"],

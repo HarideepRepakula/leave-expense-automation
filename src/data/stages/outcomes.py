@@ -15,7 +15,7 @@ Ids follow time: rows are numbered after a stable sort on their instant (docs/07
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from src.common.enums import BudgetTxnType, RequestType, RoleName
@@ -28,6 +28,7 @@ from src.services.exception_service import ExceptionCatalogue
 from src.services.expense_batch import ExpenseReplay, replay_expense
 from src.services.expense_service import DetectionParams
 from src.services.leave_batch import LeaveReplay, replay_leave
+from src.services.reimbursement_service import DUPLICATE_REIMBURSEMENT, SYSTEM, create_reimbursement
 from src.services.workflow_simulation import DecisionTiming, employee_roles
 
 ONE_DP, CENT, ZERO = Decimal("0.1"), Decimal("0.01"), Decimal("0")
@@ -37,7 +38,9 @@ CLAIM_COLUMNS = ("workflow_status", "exception_class", "decision_reason_code", "
                  "expense_policy_id", "total_amount_usd", "fx_rate_used", "receipt_status", "approved_amount")
 LINE_COLUMNS = ("expense_policy_id", "validation_result", "validation_detail")
 WORKFLOW_TABLES = ("approval_step", "approval_event", "approval_attempt", "request_status_event",
-                   "request_exception", "idempotency_record")
+                   "request_exception", "idempotency_record",
+                   "reimbursement", "reimbursement_attempt", "processing_failure", "audit_event")   # Phase 8B-1
+S13_DELAY = timedelta(hours=1)        # ASM-P8B-02: the planted second CREATE, one hour after the reimbursement
 
 
 def as_of_instant(as_of) -> datetime:
@@ -46,18 +49,19 @@ def as_of_instant(as_of) -> datetime:
 
 
 def decision_timing(cfg: dict, tables: dict[str, list[dict]], calendar: HolidayCalendar, roles: dict[str, set[str]],
-                    delays, as_of) -> DecisionTiming:
+                    delays, as_of, payments=None) -> DecisionTiming:
     owners = [e for e, r in roles.items() if RoleName.PROCESS_OWNER.value in r]
     return DecisionTiming.from_config(cfg["generation"], cfg["exception_codes"], calendar, tables["employee"],
-                                      owners, delays, as_of_instant(as_of))
+                                      owners, delays, as_of_instant(as_of), payments)
 
 
 def simulate(cfg: dict, tables: dict[str, list[dict]], calendar: HolidayCalendar,
-             delays, as_of) -> tuple[LeaveReplay, ExpenseReplay]:
+             delays, as_of, payments=None) -> tuple[LeaveReplay, ExpenseReplay]:
     """Both replays with routing and the simulated decisions up to the as-of instant. `delays(key, low, high)` is
-    the keyed draw on the delays stream. Also used by src/evaluation on the exported dataset."""
+    the keyed draw on the delays stream, `payments` the one on the payments stream (payment runs, Phase 8B-1).
+    Also used by src/evaluation on the exported dataset."""
     roles = employee_roles(tables["application_user"], tables["user_role"], tables["role"])
-    timing = decision_timing(cfg, tables, calendar, roles, delays, as_of)
+    timing = decision_timing(cfg, tables, calendar, roles, delays, as_of, payments)
     catalogue = ExceptionCatalogue.from_config(cfg["exception_codes"])
     router = ApprovalRouter.from_rows(tables["approval_rule"], tables["employee"], tables["department"],
                                       tables["delegation"])
@@ -71,11 +75,19 @@ def simulate(cfg: dict, tables: dict[str, list[dict]], calendar: HolidayCalendar
 
 
 def build_outcomes(cfg: dict, p: GenParams, streams: RngStreams, dataset: dict[str, list[dict]],
-                   calendar: HolidayCalendar) -> tuple[LeaveReplay, ExpenseReplay]:
-    """Run S6 and write its rows into `dataset` (in place). Returns the replays (for detections.csv)."""
+                   calendar: HolidayCalendar, s13: tuple[str, ...] = ()) -> tuple[LeaveReplay, ExpenseReplay]:
+    """Run S6 (with the S7 payment runs) and write its rows into `dataset` (in place). `s13`: claims that get a
+    planted second, manual CREATE (scenario S13, selected in S9). Returns the replays (for detections.csv)."""
     leave, expense = simulate(cfg, dataset, calendar,
-                              lambda key, lo, hi: streams.keyed_integers("delays", key, lo, hi), p.as_of)
+                              lambda key, lo, hi: streams.keyed_integers("delays", key, lo, hi), p.as_of,
+                              lambda key, lo, hi: streams.keyed_integers("payments", key, lo, hi))
     ls, es = leave.store, expense.store
+    for cid in s13:                       # BLOCKED attempts change nothing else, so their place in time is free
+        (made,) = es.active_reimbursements(cid)
+        res = create_reimbursement(es, cid, SYSTEM, made["created_at"] + S13_DELAY,
+                                   uuid.uuid5(CORRELATION_NAMESPACE, f"{cid}:S13"))
+        if res.reason_code != DUPLICATE_REIMBURSEMENT:
+            raise RuntimeError(f"S13 {cid}: expected DUPLICATE_REIMBURSEMENT, got {res.outcome} {res.reason_code}")
     for r in dataset["leave_request"]:
         got = ls.requests.get(r["leave_request_id"])
         if got is not None:
@@ -98,7 +110,15 @@ def build_outcomes(cfg: dict, p: GenParams, streams: RngStreams, dataset: dict[s
 
 def _workflow_rows(dataset: dict[str, list[dict]], ls, es) -> dict[str, list[dict]]:
     users = {u["employee_id"]: u["user_id"] for u in dataset["application_user"] if u["employee_id"]}
+    admins = {ur["user_id"] for ur in dataset["user_role"]
+              if ur["role_id"] == f"ROLE-{RoleName.SYSTEM_ADMIN.value}"}
+    if admins:                            # the SYSTEM actor's idempotency scope (ASM-P8-02)
+        users[SYSTEM] = min(admins)
     out: dict[str, list[dict]] = {name: [] for name in WORKFLOW_TABLES}
+    out["reimbursement"] = sorted((dict(b) for b in es.reimbursements.values()), key=lambda b: b["reimbursement_id"])
+    out["reimbursement_attempt"] = [dict(a) for a in es.reimbursement_attempts]
+    out["processing_failure"] = [dict(f) for f in ls.failures + es.failures]
+    out["audit_event"] = [dict(e) for e in ls.audit_events + es.audit_events]
     for rtype, store in ((RequestType.LEAVE.value, ls), (RequestType.EXPENSE.value, es)):
         fk, other = (("leave_request_id", "expense_claim_id") if rtype == RequestType.LEAVE
                      else ("expense_claim_id", "leave_request_id"))
@@ -125,6 +145,9 @@ def _workflow_rows(dataset: dict[str, list[dict]], ls, es) -> dict[str, list[dic
     _number(out["approval_attempt"], "attempt_id", "APA", "attempted_at", request_of)
     _number(out["request_status_event"], "event_id", "RSE", "occurred_at", request_of)
     _number(out["request_exception"], "exception_id", "REX", "detected_at", request_of)
+    _number(out["reimbursement_attempt"], "attempt_id", "RMA", "attempted_at", lambda r: r["expense_claim_id"])
+    _number(out["processing_failure"], "failure_id", "PFL", "occurred_at", lambda r: r["entity_id"] or "")
+    _number(out["audit_event"], "event_id", "AUD", "occurred_at", lambda r: "")   # same instant: operation order
     out["approval_step"].sort(key=lambda s: s["approval_step_id"])
     out["idempotency_record"].sort(key=lambda r: (r["actor_user_id"], r["idempotency_key"]))
     return out

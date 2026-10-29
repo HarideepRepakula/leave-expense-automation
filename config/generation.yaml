@@ -153,6 +153,15 @@ anomalies:
 decisions:
   decision_hour_utc: 17
   delay_business_days: {L1: [0, 5], L2: [1, 7], L3: [1, 7], L4: [2, 10], L5: [3, 15], PROCESS_OWNER: [3, 20]}
+# Stage S7 (Phase 8B-1): payment runs (BR-RMB-03, ASM-035, ASM-P8B-01). Keyed draws on the reserved `payments`
+# stream, key (claim id, "DELAY") and (claim id, "FAIL"). A run starts and settles at run_hour_utc on the n-th
+# business day (claimant's country) counted from the day after the approval; a failed first attempt is retried
+# retry_after_business_days later and succeeds. Runs after the as-of instant do not happen.
+payments:
+  delay_business_days: [1, 5]
+  first_attempt_failure_percent: 5
+  retry_after_business_days: 2
+  run_hour_utc: 17
 boundaries:
   per_case: 3                                   # BC-01..BC-09 each sub-case (docs/02 section 6)
   bc10_groups: 2

@@ -42,6 +42,11 @@ TABLE_ORDER: list[str] = [
     "request_status_event",
     "request_exception",
     "idempotency_record",
+    # Stages S7-S8 (Phase 8B-1): reimbursements, payment runs, technical failures, audit history
+    "reimbursement",
+    "reimbursement_attempt",
+    "processing_failure",
+    "audit_event",
 ]
 
 

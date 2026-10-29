@@ -94,12 +94,14 @@ def build(seed: int | None = None, employees: int | None = None, leave_requests:
         truth = build_ground_truth(cfg, p, dataset, wb.plants, wb.boundaries, leave_map, claim_map,  # S9
                                    config_dir, FIXTURES_DIR)
         stages += ["S5 anomalies + boundaries (in place)", "S9 ground truth (planted definitions + reference oracle)"]
-        leave, expense = build_outcomes(cfg, p, streams, dataset, calendar)                        # S6
+        leave, expense = build_outcomes(cfg, p, streams, dataset, calendar, truth.s13)             # S6-S8
         detections = sorted(leave.submission_detections() + leave.detections + expense.submission_detections()
                             + expense.detections, key=lambda d: (d.record_type, d.record_id, d.exception_code,
                                                                   d.detected_by))
         stages.append("S6 workflow outcomes (services replay with simulated decisions, as-of cut-off, "
                       "year-end carry-forward) -> outcome tables and validation/detections.csv (Phase 7B)")
+        stages.append("S7 reimbursements at final approval and payment runs (failures, retries), S13 attempts; "
+                      "S8 audit_event from every operation (Phase 8B-1)")
 
     for name in WORKFLOW_TABLES + ("cost_center_transaction",):
         dataset.setdefault(name, [])          # the Phase 3 baseline has no workflow outcomes (S6 builds them)
