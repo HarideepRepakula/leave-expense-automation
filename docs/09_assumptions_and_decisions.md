@@ -447,7 +447,7 @@ Original proposals:
 - Cosmetic synthetic-data quirk (owner 2026-10-28, keep): EMP-000181 (GB) is head of DEPT-05 and, after the promotion, has the job title "Chief Financial Officer". Routing is unaffected: one person resolved for several levels gets one step with covered_levels (in the dataset EMP-000181 holds L1, L2, L1+L2 in one step, and L3 steps; services = oracle on every record).
 - Before / after the S19 change (seed 20261022 / 400): employees G6 24 -> 22, G7 1 -> 3; approval_step 2548 -> 2547 (APPROVED 2506 -> 2518, PENDING 42 -> 29); leave at as-of APPROVED 755 -> 756, DRAFT 8 -> 7, ESCALATED 5 -> 6, PENDING 12 -> 11 (REJECTED 12, RETURNED 8 unchanged); expense APPROVED 893 -> 902, ESCALATED 19 -> 17, PENDING 20 -> 12, RETURNED 33 -> 34 (DRAFT 8, REJECTED 27 unchanged).
 
-## 13. Phase 8 additions (reimbursement and audit), split 8A / 8B, awaiting approval
+## 13. Phase 8 additions (reimbursement and audit), split 8A / 8B; CLOSED 2026-10-29 (8A, 8B-1 approved; 8B-2 deferred)
 
 Split (2026-10-29): 8A = services, tests and docs (the dataset is unchanged, fingerprint 28ece855...); 8B = the
 dataset part, made only after the owner's OK on the plan in 13.4.
@@ -567,3 +567,22 @@ Result at seed 20261022 / 400 (before = commit d9eeca9, after = 8B-1):
 - Changed counts: idempotency_record 2,563 -> 3,501 (+930 PROCESS_PAYMENT, +8 CREATE_REIMBURSEMENT);
   cost_center_transaction 1,041 -> 1,942 (+893 ACTUAL, +8 RELEASE at completion of the 8 capped S07a claims).
   Labels 1,055 -> 1,100 (+8 S13 planted, +37 S25). Every other table count and every status at as-of unchanged.
+
+### 13.6 Phase 8 closure (owner 2026-10-29)
+
+8A accepted (d9eeca9); 8B-1 APPROVED (6f1b4e1); AMB-P8-01..05 defaults accepted. 8B-2 DEFERRED to future work:
+plan items 3, 4, 5 of 13.4 (S11 / S12 plants, resubmissions, cancellations never on planted or boundary records),
+S18 SUBMIT idempotency rows (AMB-P8-04) and migration 0003 ground_truth.record_round_expectation (record, round,
+expected codes, expected status after validation). Until then the dataset has no resubmission, no cancellation and
+no S11 / S12 / S18 rows (actual counts NULL).
+
+## 14. Phase 9 scope decisions (owner 2026-10-29; to be implemented in Phase 9)
+
+| ID | Decision |
+|---|---|
+| DEC-29 (revised) | Groq explanation layer: one endpoint GET /requests/{id}/explanation returns a plain-language explanation of what happened to a leave request or expense claim. The LLM receives a small synthetic fact set only: request type, status, exception codes, reason codes, approval steps (level, status, decision time), amount and currency, plus the template text; never names or emails. Replaces "only the template text and the codes". |
+| DEC-P9-01 | The LLM never affects any decision, status, amount or routing; it only explains. The endpoint reads only the request's own operational rows (request, steps, exceptions, status events) through the services layer, never ground truth; tests/test_ground_truth_isolation.py covers the new module. |
+| DEC-P9-02 | Output check kept: the LLM text must contain every exception code, rule id and amount of the facts and must not contain "fraud" or "misconduct"; otherwise the template text is returned. |
+| DEC-P9-03 | Deterministic template fallback, flagged source "template", when LLM_EXPLANATIONS_ENABLED is off, GROQ_API_KEY is empty, or the call fails, times out or hits a rate limit; never an error for the user and never a blocked decision. The response carries source "llm" or "template". |
+| DEC-P9-04 | The explanation is never stored, exported, checksummed or audited (no audit row, not even "served"). |
+| DEC-P9-05 | GROQ_API_KEY, GROQ_MODEL and LLM_EXPLANATIONS_ENABLED are read from .env (.env.example keeps empty placeholders; the key is never printed). The default model is taken from Groq's current documentation at the start of Phase 9 (a free-tier model), with the documented free-tier limits recorded here; this closes the "Groq limits unverified" item (ASM-051, ASM-052). Tests mock the HTTP call: success, fallback on failure, no key, and decisions identical with and without the explanation. Time box about 15 minutes; one line in docs/03 and docs/09. |

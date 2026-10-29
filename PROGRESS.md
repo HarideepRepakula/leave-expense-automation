@@ -1,8 +1,24 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 8B-1 (reimbursements, payment runs, S13, S25, audit_event export)
-Status: 8B-1 COMPLETE. Awaiting "APPROVED 8B-1"; then 8B-2 (resubmissions, cancellations, S11/S12, S18, migration
-  0003 record_round_expectation). "APPROVED PHASE 8" after 8B-2.
+Current phase: Phase 9 (FastAPI backend) - next; starts in a new conversation.
+Status: Phase 8 CLOSED 2026-10-29 (8A d9eeca9 accepted; 8B-1 6f1b4e1 APPROVED; 8B-2 DEFERRED to future work).
+
+Phase 8 closure (owner 2026-10-29):
+- APPROVED 8B-1. 8B-2 DEFERRED to future work: resubmissions with per-code fixes, cancellations, S11 / S12 plants,
+  S18 SUBMIT idempotency rows, migration 0003 ground_truth.record_round_expectation (owner decisions for it stay
+  recorded in docs/09 13.4). The services for resubmission and cancellation exist and are tested; the dataset has
+  none (S11, S12, S18 actual counts stay NULL).
+- AMB-P8-01..05 defaults accepted; ledger-posting audit skipped (DEC-P8-09); hash chain deferred to Phase 12
+  (DEC-P8-10).
+Phase 9 scope addition (owner 2026-10-29; docs/09 section 14): a small Groq explanation layer, about 15 minutes of
+  the time box: GET /requests/{id}/explanation, a plain-language explanation from a small fact set; never affects
+  any decision, status, amount or routing; reads only the request's own operational rows through the services
+  layer, never ground truth; template fallback (source "template") when the flag is off, the key is empty, or the
+  call fails, times out, hits a rate limit or fails the output check; never stored, exported, checksummed or
+  audited; GROQ_API_KEY / GROQ_MODEL / LLM_EXPLANATIONS_ENABLED from .env (empty placeholders in .env.example);
+  default model and free-tier limits taken from Groq's current docs at the start of Phase 9 (closes the open item);
+  tests mock HTTP (success, failure fallback, no key, decisions identical with and without); one line in docs/03
+  and docs/09.
 
 Phase 1: APPROVED 2026-10-26 (review round 1 applied; S19 split into S19-L / S19-E for clear subtotals).
 Phase 2: APPROVED 2026-10-26, including DEC-30 to DEC-36.
