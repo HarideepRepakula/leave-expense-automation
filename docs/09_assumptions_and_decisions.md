@@ -576,7 +576,7 @@ S18 SUBMIT idempotency rows (AMB-P8-04) and migration 0003 ground_truth.record_r
 expected codes, expected status after validation). Until then the dataset has no resubmission, no cancellation and
 no S11 / S12 / S18 rows (actual counts NULL).
 
-## 14. Phase 9 scope decisions (owner 2026-10-29; to be implemented in Phase 9)
+## 14. Phase 9 scope decisions (owner 2026-10-29; implemented in Phase 9, see 14.1-14.3)
 
 | ID | Decision |
 |---|---|
@@ -586,3 +586,38 @@ no S11 / S12 / S18 rows (actual counts NULL).
 | DEC-P9-03 | Deterministic template fallback, flagged source "template", when LLM_EXPLANATIONS_ENABLED is off, GROQ_API_KEY is empty, or the call fails, times out or hits a rate limit; never an error for the user and never a blocked decision. The response carries source "llm" or "template". |
 | DEC-P9-04 | The explanation is never stored, exported, checksummed or audited (no audit row, not even "served"). |
 | DEC-P9-05 | GROQ_API_KEY, GROQ_MODEL and LLM_EXPLANATIONS_ENABLED are read from .env (.env.example keeps empty placeholders; the key is never printed). The default model is taken from Groq's current documentation at the start of Phase 9 (a free-tier model), with the documented free-tier limits recorded here; this closes the "Groq limits unverified" item (ASM-051, ASM-052). Tests mock the HTTP call: success, fallback on failure, no key, and decisions identical with and without the explanation. Time box about 15 minutes; one line in docs/03 and docs/09. |
+
+### 14.1 Groq model and limits (checked 2026-10-29; closes ASM-051 / ASM-052)
+
+- https://console.groq.com/docs/deprecations: llama-3.1-8b-instant and llama-3.3-70b-versatile (the ASM-051 names) were
+  shut down on 2026-08-16 for free and developer tiers; Groq names openai/gpt-oss-20b as the replacement for the 8B model.
+- https://console.groq.com/docs/models: openai/gpt-oss-20b is a production model. Default in config/llm.yaml.
+- https://console.groq.com/docs/rate-limits: openai/gpt-oss-20b 30 requests/min, 1,000 requests/day, 8,000 tokens/min,
+  200,000 tokens/day. Caveat: the page has Free / Developer tabs and its text says the table shows "base limits for the
+  Developer plan"; the exact limits of an organisation are on its console limits page. On a limit: HTTP 429 with
+  retry-after. Recorded in config/llm.yaml (documented_limits); the code does not enforce them (no rate limiting, as
+  scoped).
+
+### 14.2 Phase 9 decisions and assumptions (ASSUMPTION, illustrative synthetic)
+
+| ID | Decision |
+|---|---|
+| DEC-P9-06 | API structure: src/api/core.py (context, transactions, JWT, errors), routes.py (operational), evaluation_routes.py (the only API module importing src/evaluation), main.py (create_app factory). Started with `uvicorn src.api.main:create_app --factory`. |
+| DEC-P9-07 | Operations connect as lea_app, GET /evaluation as lea_evaluation (DATABASE_URL with the role's user and password from .env). lea_analytics_ro is not used (no views yet; Phase 10). |
+| DEC-P9-08 | Submission = insert a DRAFT row (id from id_sequence, LVE-/EXP-<year>-nnnnnn of the receipt year) and call submit_leave / submit_expense in the same transaction. Claim country, currency and default cost center come from the employee; lines carry no receipt (receipt upload is out of scope), so lines above the receipt threshold return MISSING_RECEIPT as the rules say. |
+| DEC-P9-09 | Business time of an API call = request receipt time from SystemClock (src/common/clock.py says so); tests inject a fixed clock. JWT expiry also uses the wall clock (8 h, JWT_EXPIRES_MINUTES). |
+| DEC-P9-10 | Idempotency-Key header is required on decisions and on reimbursement creation; the stored key is sha256("api", client key), scoped per user as before. Same key and body: replay (200, replayed true, no new attempt); same key, other body: 409 IDEMPOTENCY_CONFLICT. |
+| DEC-P9-11 | A BLOCKED attempt is committed (audit trail) and then answered as an error: 403 for SELF_APPROVAL / UNAUTHORIZED_APPROVER, 409 for other guards (e.g. DUPLICATE_REIMBURSEMENT); details carry outcome and the current workflow_status. |
+| DEC-P9-12 | Errors always {"error": {"code", "message", "details"}}; 401 NOT_AUTHENTICATED / INVALID_TOKEN / TOKEN_EXPIRED / INVALID_CREDENTIALS, 403 FORBIDDEN_ROLE, 404 NOT_FOUND, 409 IDEMPOTENCY_CONFLICT / DECISION_REFUSED / ILLEGAL_TRANSITION / CONSTRAINT_VIOLATION, 422 VALIDATION_ERROR / INVALID_INPUT / UNKNOWN_POLICY, 500 INTERNAL_ERROR (no internals). Money and quantities are JSON strings. |
+| DEC-P9-13 | Roles: submit = REQUESTER; step decisions = APPROVER or PROCESS_OWNER (the service then checks authority per step); escalation = PROCESS_OWNER or APPROVER (L4 for BUDGET_EXCEEDED); create reimbursement = OPS_ANALYST, PROCESS_OWNER or SYSTEM_ADMIN; evaluation = OPS_ANALYST or SYSTEM_ADMIN. Reads: a user holding only REQUESTER sees only their own requests (others 404); APPROVER, PROCESS_OWNER, OPS_ANALYST and SYSTEM_ADMIN see all. Roles are read from user_role at login and carried in the token. |
+| DEC-P9-14 | Correlation ids of API calls are uuid5 of (user, operation, target, receipt time, key): deterministic, no random ids. |
+| DEC-P9-15 | GET /evaluation returns src/evaluation/summary.py: the AGREE / DISAGREE counts of the two comparison CSVs (it does not re-run the oracle) and, through lea_evaluation, how many ground-truth records' expected status at as-of equals the stored ops status. The latter compares the CURRENT status, so API changes after the load show as differences. |
+| DEC-P9-16 | Explanation: no in-memory cache (ASM-053 mentioned one; nothing is stored at all, simpler); the fallback reason (disabled, no_api_key, timeout, rate_limited, call_failed, output_check_failed) is returned next to the text. |
+
+### 14.3 Ambiguities found in Phase 9 (default APPLIED; please confirm or change)
+
+| ID | Question | Default applied |
+|---|---|---|
+| AMB-P9-01 | Should first submissions accept a client Idempotency-Key (the services only record RESUBMIT keys)? | No; submissions are not idempotent through the API yet. |
+| AMB-P9-02 | Should a token be re-checked against user_role / is_active on every call? | No; roles from login are trusted until expiry (8 h). |
+| AMB-P9-03 | Groq limits: the docs label the table ambiguously (Free vs Developer). | Recorded both the figures and the caveat (14.1); verify on the console limits page. |

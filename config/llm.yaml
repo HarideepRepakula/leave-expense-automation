@@ -1,0 +1,22 @@
+# Optional explanation layer (DEC-29 revised, DEC-P9-01..05). Display only; never affects a decision, status,
+# amount or route. GROQ_MODEL in .env overrides default_model; GROQ_API_KEY lives only in .env.
+illustrative_synthetic: true
+
+provider: groq
+endpoint: https://api.groq.com/openai/v1/chat/completions
+# Checked 2026-10-29 (https://console.groq.com/docs/models, /docs/deprecations): llama-3.1-8b-instant and
+# llama-3.3-70b-versatile were shut down 2026-08-16 (free and developer tiers); Groq names openai/gpt-oss-20b as
+# the replacement. It is a production model.
+default_model: openai/gpt-oss-20b
+timeout_seconds: 5
+retries_on_transient_error: 1      # 5xx or timeout; never on 429
+max_completion_tokens: 1024        # gpt-oss is a reasoning model: reasoning tokens count here too
+temperature: 0
+# Documented limits for openai/gpt-oss-20b (https://console.groq.com/docs/rate-limits, read 2026-10-29). The page
+# has Free / Developer tabs and its text says the table shows "base limits for the Developer plan"; the exact limits
+# for an organisation are on its console limits page. On a limit Groq answers HTTP 429 with retry-after.
+documented_limits:
+  requests_per_minute: 30
+  requests_per_day: 1000
+  tokens_per_minute: 8000
+  tokens_per_day: 200000

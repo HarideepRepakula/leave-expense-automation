@@ -31,8 +31,18 @@ class Settings(BaseSettings):
     postgres_evaluation_user: str = Field(default="lea_evaluation", alias="POSTGRES_EVALUATION_USER")
     postgres_evaluation_password: str = Field(default="", alias="POSTGRES_EVALUATION_PASSWORD")
 
+    jwt_secret: str = Field(default="", alias="JWT_SECRET")
+    jwt_expires_minutes: int = Field(default=480, alias="JWT_EXPIRES_MINUTES")
+
     llm_explanations_enabled: bool = Field(default=False, alias="LLM_EXPLANATIONS_ENABLED")
     groq_api_key: str = Field(default="", alias="GROQ_API_KEY")
+    groq_model: str = Field(default="", alias="GROQ_MODEL")   # empty = config/llm.yaml default_model
+
+    def role_url(self, user: str, password: str) -> str:
+        """DATABASE_URL with another login role (docs/03 7.1): lea_app for the API, lea_evaluation for evaluation."""
+        from sqlalchemy.engine import make_url
+
+        return make_url(self.database_url).set(username=user, password=password)             .render_as_string(hide_password=False)
 
 
 @lru_cache(maxsize=1)

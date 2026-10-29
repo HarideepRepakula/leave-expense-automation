@@ -81,3 +81,14 @@ Real output only. PROGRESS.md and the end-of-phase report quote the actual pytes
   audit ids follow time; one audit row per request transition.
 - tests/data/test_anomalies_and_ground_truth.py and test_expense_services_on_dataset.py: S13 / S25 counted and
   excluded from the exception-code and detector comparisons (they are attempt and failure rows).
+
+## Phase 9 tests
+
+- tests/api/test_api.py (db): TestClient on lea_test (every request a savepoint of the rolled-back test connection):
+  login with roles from user_role, 401 without or with a bad token, 403 FORBIDDEN_ROLE, leave submit, blocked
+  self-approval (403, attempt committed), approve, idempotent replay and key conflict, process-owner decision on an
+  escalated request, expense submit / get / list, reimbursement create / read / duplicate, evaluation endpoint,
+  isolation (only src/api/evaluation_routes.py imports src/evaluation; lea_app is denied ground_truth).
+- tests/api/test_explanation.py: Groq call mocked with httpx.MockTransport: success; fallback on 5xx (one retry),
+  401, timeout, 429 (no retry), failed output check, forbidden word; no key and flag off make no call; (db) decisions
+  and every stored row identical with and without the explanation.

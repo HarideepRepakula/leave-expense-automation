@@ -1,6 +1,6 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 9 (FastAPI backend) - next; starts in a new conversation.
+Current phase: Phase 9 (FastAPI backend) - DONE, waiting for "APPROVED PHASE 9".
 Status: Phase 8 CLOSED 2026-10-29 (8A d9eeca9 accepted; 8B-1 6f1b4e1 APPROVED; 8B-2 DEFERRED to future work).
 
 Phase 8 closure (owner 2026-10-29):
@@ -60,6 +60,57 @@ Phase 8 split (2026-10-29, owner allowed a split): 8A = carried-over items 1-2, 
   S7 / S8 stages, S11-S13, S25, V-ARITH-04 and V-WF-03 on real rows), after the owner's OK on docs/09 13.4.
 
 Phase 8A: accepted by the owner 2026-10-29 (commit d9eeca9); 8B plan approved with conditions (docs/09 13.4).
+
+## Phase 9 record
+
+Scope implemented: FastAPI app (src/api: core.py context / transactions / JWT / errors, routes.py operational routes,
+evaluation_routes.py, main.py create_app factory) on the existing services, no service changes. JWT HS256 with roles
+from user_role; every route needs a token. Endpoints: POST /auth/login, GET /auth/me; POST /leave-requests, POST
+/expense-claims (DRAFT row + submit service in one transaction); POST /requests/{id}/steps/{step}/decision and POST
+/requests/{id}/escalation-decision (Idempotency-Key required; replay / conflict); POST /reimbursements, GET
+/reimbursements/{id}; GET /leave-requests, /expense-claims (limit/offset) and /{id} with steps, status history,
+exceptions (and lines); GET /requests/{id}/explanation (Groq, template fallback); GET /evaluation (src/evaluation/
+summary.py via lea_evaluation). Operations as lea_app. One error format; OpenAPI at /docs. New random JWT_SECRET
+written to .env (not printed); .env.example placeholders empty (JWT_SECRET, GROQ_API_KEY, GROQ_MODEL).
+Groq (docs/09 14.1): llama-3.1-8b-instant / llama-3.3-70b-versatile shut down 2026-08-16; default openai/gpt-oss-20b
+(config/llm.yaml); documented limits 30 RPM, 1,000 RPD, 8,000 TPM, 200,000 TPD (table labelled ambiguously Free /
+Developer; AMB-P9-03). Closes ASM-051 / ASM-052. Decisions DEC-P9-06..16, ambiguities AMB-P9-01..03 (defaults applied).
+Services import nothing from src/reference; only src/api/evaluation_routes.py imports src/evaluation; ground truth
+isolated (lea_app denied, tested); workflow status, exception class, processing_failure and audit/attempt rows stay
+separate.
+
+Files created: src/api/{core,routes,evaluation_routes,main}.py; src/services/explanation_service.py;
+src/repositories/read_repository.py; src/evaluation/summary.py; config/llm.yaml; tests/api/{__init__,conftest,
+test_api,test_explanation}.py. Files changed: src/common/config.py (JWT, GROQ_MODEL, role_url); .env.example;
+requirements.txt, pyproject.toml (fastapi 0.115.12, uvicorn 0.34.2, PyJWT 2.10.1, httpx 0.28.1; version 0.9.0);
+docs/03 (one line), docs/09 (14 heading, 14.1-14.3), docs/15; PROGRESS.md. .env (JWT_SECRET only, git-ignored).
+No migration, no data change.
+
+Commands:
+    python -m pip install -r requirements.txt
+    uvicorn src.api.main:create_app --factory --port 8000      # docs at http://127.0.0.1:8000/docs
+    python -m src.validation
+    python -m src.evaluation.leave_service_vs_oracle
+    python -m src.evaluation.expense_service_vs_oracle
+    .\scriptseproducibility_check.ps1
+    pytest -q
+
+REAL results (2026-10-29):
+- pytest -q: 506 passed, 1 warning (starlette DeprecationWarning) in 72.34s (488 + 18 new). ruff --select F,E9 src tests
+  migrations: All checks passed.
+- Validation: 22 checks PASS, 0 failed; M1 0/66090, M2 0/92252, M3 7883/7883.
+- Leave comparison 800 AGREE / 0 DISAGREE; expense 1000 AGREE / 0 DISAGREE.
+- reproducibility_check.ps1: 76 of 76 identical, fingerprint 60d8e077... (unchanged), RESULT: REPRODUCIBLE, exit 0.
+- Smoke run against lea_dev through lea_app / lea_evaluation (TestClient, read-only): login, list, explanation (template,
+  flag off), evaluation (800 / 1000 AGREE; status at as-of = expected for 800 + 1000), /docs 200.
+- No live Groq call was made (tests mock HTTP).
+
+Open issues: AMB-P9-01..03; receipts cannot be attached through the API (claims above the receipt threshold return
+MISSING_RECEIPT); no resubmission / cancellation / payment-run endpoints (out of the Phase 9 list); tokens not
+re-checked against user_role until expiry.
+
+Acceptance criteria after Phase 9: API with documented endpoints, auth, structured errors: MET for the scoped list;
+others as after Phase 8.
 
 ## Phase 8B-1 record
 

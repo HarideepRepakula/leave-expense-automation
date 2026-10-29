@@ -111,6 +111,8 @@ decision_output (codes, amounts, template text)
    -> API response field explanation {text, source, model}; never stored, exported or audited
 ```
 
+As built in Phase 9 (DEC-29 revised): GET /requests/{id}/explanation; facts from the request's own ops rows (codes, status, steps, amount; no names or emails); model openai/gpt-oss-20b by default (config/llm.yaml, GROQ_MODEL overrides); source "llm" or "template"; no cache.
+
 ## 5. Technology choices and rationale
 
 | Concern | Choice | Why |

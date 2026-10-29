@@ -12,6 +12,11 @@ numpy==2.2.6
 Faker==37.4.0
 PyYAML==6.0.2
 bcrypt==4.3.0
+# Phase 9: API (FastAPI + Uvicorn), JWT (PyJWT), HTTP client for the optional Groq call and TestClient.
+fastapi==0.115.12
+uvicorn==0.34.2
+PyJWT==2.10.1
+httpx==0.28.1
 pytest>=8.2,<9
 pytest-cov>=5,<6
 ruff>=0.5,<1
