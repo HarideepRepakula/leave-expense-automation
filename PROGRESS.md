@@ -1,13 +1,65 @@
 Project: Enterprise Leave and Expense Approval Automation System
 
-Current phase: Phase 10 (Streamlit dashboard) - DONE, waiting for "APPROVED PHASE 10".
+Current phase: Completion pass against the spec (after Phase 10) - DONE, waiting for "APPROVED COMPLETION".
+Phase 10: APPROVED 2026-10-29 (commit 62e065d). AMB-P10-01..04 accepted as applied (docs/09 15.3).
+
+## Completion pass record (2026-10-29)
+
+Scope implemented (time-boxed, priority order):
+1. M1-M18 in src/evaluation/metrics.py (lea_evaluation; reads ops + ground truth + validation_report.json,
+   detections.csv, reproducibility.json). `python -m src.evaluation.metrics` writes data/validation/evaluation.csv,
+   .json, .md; GET /evaluation returns them ("metrics"); the Evaluation view shows the table, a breakdown per metric
+   and the "How to read these results" note (also docs/08 section 7). M9 = "not measurable" (S11 / S12 deferred).
+   compare_runs got --report; both reproducibility scripts write data/validation/reproducibility.json (M13).
+2. Read-only API routes (src/api/read_routes.py, DEC-CP-01): /employees, /leave-policies, /leave-balances,
+   /expense-policies, /expense-lines, /approval-queue, /requests/{id}/audit-history, /requests/{id}/investigation,
+   /dashboard/metrics.
+3. Migration 0004_analytics_views_2 (seven views, DEC-CP-02; the deferred 8B-2 migration is now 0005). Dashboard:
+   Overview adds total employees, escalated, returned, approved, rejected, exceptions and high-priority issues
+   (DEC-CP-03) with the PENDING_APPROVAL-only caption; new pages Analytics, Approval operations, Reimbursements
+   (src/dashboard/pages.py) with the spec-20 filters; the analyst request detail uses /investigation (expense lines,
+   applicable policy, attempts, reimbursements, audit events).
+4. Tests: tests/api/test_read_routes.py (9), tests/evaluation/test_metrics.py (5), dashboard KPI tests (2), smoke on
+   all seven pages.
+Also: fixed three corrupted ".\scripts\reproducibility_check.ps1" lines in this file (a stray CR from an earlier edit).
+
+Files created: src/evaluation/metrics.py; src/api/read_routes.py; src/dashboard/pages.py;
+migrations/versions/0004_analytics_views_2.py; tests/api/test_read_routes.py; tests/evaluation/{__init__,
+test_metrics}.py.
+Files changed: src/evaluation/summary.py; src/repositories/read_repository.py; src/api/main.py; src/dashboard/
+{app,client,views,evaluation_view}.py; src/data/compare_runs.py; scripts/reproducibility_check.{ps1,sh};
+tests/dashboard/test_dashboard.py; tests/db/test_roles_and_migration_cycle.py (head 0004); sql/grants.sql (comment);
+docs/03, 08, 09 (15.3, 16), 10, 13, 14, 15; README.md; PROGRESS.md. No dataset change.
+
+Commands:
+    alembic upgrade head                           # adds migration 0004 views to lea_dev
+    python -m src.validation
+    python -m src.evaluation.leave_service_vs_oracle
+    python -m src.evaluation.expense_service_vs_oracle
+    .\scripts\reproducibility_check.ps1            # also writes data/validation/reproducibility.json (M13)
+    python -m src.evaluation.metrics               # data/validation/evaluation.{csv,json,md}
+    pytest -q
+
+REAL results (2026-10-29): see the end-of-pass report; validation 22 PASS, M1 0/66090, M2 0/92252, M3 7883/7883;
+leave 800 AGREE, expense 1000 AGREE; reproducibility 76 of 76 identical, fingerprint 60d8e077..., REPRODUCIBLE.
+Metrics: M4 1611/1612, M5 1664/1665 (AMB-CP-01), M6-M8 226 TP 0 FP 0 FN, M9 not measurable, M10 32/32, M11 8/8,
+M12 0/902, M13 76/76, M14 8.36 days (1673 decided; 24 legacy excluded), M15 23 (+23 escalated, 42 returned),
+M16 1/1612, M17 0/1576 (all 39 rejections are planted; 39/1697 business view), M18 5.35 days.
+
+Not finished / open: AMB-CP-01..04 (docs/09 16.2); leave utilisation not shown (AMB-CP-02); M14 business-day
+variant and M18 business-day variant not computed; the Requests page keeps its own filter set (AMB-CP-04);
+AMB-P9-03; docs/02 traceability rows still to update (Phase 12).
+
+Acceptance criteria: spec 17 metrics in CSV / JSON / Markdown: MET (17 measured, M9 not measurable with reason).
+Spec 19 endpoints: MET for every listed resource. Spec 20: MET except leave utilisation (AMB-CP-02). Operational
+views separate from ground-truth evaluation: MET (tested).
 Phase 9: APPROVED 2026-10-29 (commit 90c730a). AMB-P9-01 and AMB-P9-02 accepted, recorded as known limitations in
   README.md; Groq model openai/gpt-oss-20b accepted; AMB-P9-03 stays open (docs/09 14.4).
 Status: Phase 8 CLOSED 2026-10-29 (8A d9eeca9 accepted; 8B-1 6f1b4e1 APPROVED; 8B-2 DEFERRED to future work).
 
 Phase 8 closure (owner 2026-10-29):
 - APPROVED 8B-1. 8B-2 DEFERRED to future work: resubmissions with per-code fixes, cancellations, S11 / S12 plants,
-  S18 SUBMIT idempotency rows, migration 0003 ground_truth.record_round_expectation (owner decisions for it stay
+  S18 SUBMIT idempotency rows, migration 0005 (renumbered) ground_truth.record_round_expectation (owner decisions for it stay
   recorded in docs/09 13.4). The services for resubmission and cancellation exist and are tested; the dataset has
   none (S11, S12, S18 actual counts stay NULL).
 - AMB-P8-01..05 defaults accepted; ledger-posting audit skipped (DEC-P8-09); hash chain deferred to Phase 12
@@ -91,7 +143,7 @@ Commands:
     python -m src.validation
     python -m src.evaluation.leave_service_vs_oracle
     python -m src.evaluation.expense_service_vs_oracle
-    .\scriptseproducibility_check.ps1
+    .\scripts\reproducibility_check.ps1
     pytest -q
 
 REAL results (2026-10-29):
@@ -106,7 +158,7 @@ REAL results (2026-10-29):
 Open issues: AMB-P10-01..04; AMB-P9-03; docs/02 traceability rows R-20.x / AM-F3 still name the planned test files
 (update in Phase 12); spec 20 analytics not in the 4-view scope (approval aging, approver workload, leave
 utilisation, turnaround, filters by department / manager / cost center / date) stay future work; the deferred 8B-2
-migration becomes 0004.
+migration becomes 0004 (now 0005, see the completion pass).
 
 Acceptance criteria after Phase 10: "the dashboard works" (spec 20): MET for the scoped 4 views; operational views
 separate from ground-truth evaluation views: MET (tested); others as after Phase 9.
@@ -142,8 +194,7 @@ Commands:
     python -m src.validation
     python -m src.evaluation.leave_service_vs_oracle
     python -m src.evaluation.expense_service_vs_oracle
-    .\scripts
-eproducibility_check.ps1
+    .\scripts\reproducibility_check.ps1
     pytest -q
 
 REAL results (2026-10-29):
@@ -395,8 +446,7 @@ Commands:
     python -m src.validation
     python -m src.evaluation.expense_service_vs_oracle
     python -m src.evaluation.leave_service_vs_oracle
-    .\scripts
-eproducibility_check.ps1
+    .\scripts\reproducibility_check.ps1
     pytest -q
 
 REAL results (2026-10-28):

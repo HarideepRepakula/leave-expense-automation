@@ -9,17 +9,26 @@ TestClient) and `analytics` (an engine) before running the app.
 from __future__ import annotations
 
 import os
+from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import httpx
 import pandas as pd
 import sqlalchemy as sa
+import yaml
 
 from src.common.config import get_settings
 
+ROOT = Path(__file__).resolve().parents[2]
 API_URL = os.environ.get("DASHBOARD_API_URL", "http://127.0.0.1:8000")
 VIEWS = {"requests": "ops.v_request", "exceptions": "ops.v_request_exception",
-         "reimbursements": "ops.v_reimbursement"}
+         "reimbursements": "ops.v_reimbursement",
+         # migration 0004 (completion pass)
+         "employees": "ops.v_employee", "dimensions": "ops.v_request_dimension", "lines": "ops.v_expense_line",
+         "steps": "ops.v_approval_step", "approval_attempts": "ops.v_approval_attempt",
+         "reimbursement_attempts": "ops.v_reimbursement_attempt", "failures": "ops.v_processing_failure"}
+ANALYST_ROLES = {"PROCESS_OWNER", "OPS_ANALYST", "SYSTEM_ADMIN"}
 
 api: httpx.Client | None = None
 analytics: sa.Engine | None = None
@@ -77,6 +86,13 @@ def frame(view: str) -> pd.DataFrame:
     """All rows of one analytics view (a few thousand at most, amendment F6)."""
     with _analytics().connect() as conn:
         return pd.read_sql(sa.text(f"SELECT * FROM {VIEWS[view]}"), conn)
+
+
+def as_of() -> date:
+    """The dataset as-of date (config/generation.yaml), used for ages; the data are synthetic and end there."""
+    cfg = yaml.safe_load((ROOT / "config" / "generation.yaml").read_text(encoding="utf-8"))
+    value = cfg["as_of_date"]
+    return value if isinstance(value, date) else date.fromisoformat(str(value))
 
 
 def money(values) -> Decimal:

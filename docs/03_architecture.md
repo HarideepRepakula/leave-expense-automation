@@ -116,6 +116,9 @@ As built in Phase 9 (DEC-29 revised): GET /requests/{id}/explanation; facts from
 ### 4.5 Dashboard read paths (Phase 10)
 
 As built: aggregates from ops.v_request, ops.v_request_exception and ops.v_reimbursement (migration 0003) as lea_analytics_ro (SELECT on those views only); request detail, explanation, GET /detections and GET /evaluation through the API with the user's JWT. Only src/dashboard/evaluation_view.py calls /evaluation. Guide: docs/13_dashboard_guide.md.
+Completion pass: seven more views (migration 0004, docs/10) feed the Analytics, Approval operations and
+Reimbursements pages; read-only API routes in src/api/read_routes.py (DEC-CP-01); M1-M18 in
+src/evaluation/metrics.py, served by GET /evaluation.
 
 ## 5. Technology choices and rationale
 

@@ -165,3 +165,36 @@ evaluation.md: one section per metric with definition, population, result table 
 - tests/test_ground_truth_isolation.py: fails if anything outside src/evaluation, src/reference and the ground-truth writer stage touches ground truth.
 - tests/test_reference_independence.py: fails if src/reference and src/services import each other.
 - tests/reference/test_reference_oracle.py: hand-built cases with known routes and exception codes for the reference calculation itself.
+
+As built (completion pass): tests/evaluation/test_metrics.py covers the helpers, the matching (known TP / FP / FN),
+the planted exclusion of M4, "not measurable" on missing inputs, and that every metric on lea_dev is either measured
+or carries its reason. The separate files listed above were folded into that one file.
+
+## 7. Implementation and how to read the results (completion pass)
+
+Command: `python -m src.evaluation.metrics` (role lea_evaluation) writes data/validation/evaluation.csv,
+evaluation.json and evaluation.md; GET /evaluation returns the same result under "metrics", shown in the dashboard's
+Evaluation view. Inputs besides the database: validation_report.json (M1-M3) and detections.csv from
+`python -m src.validation`, reproducibility.json (M13) from `scripts/reproducibility_check.ps1`. A metric whose
+population is empty or whose input is missing is reported as "not measurable: <reason>", never as a number.
+
+How to read these results: the benchmark is synthetic and its anomalies are planted by our own generator, so 100%
+precision and recall shows that the detectors implement the documented rules; it does not predict accuracy on real
+data. Some detections are counted by construction: a duplicate reimbursement is blocked by a database unique index
+and recorded as a BLOCKED attempt, and a payment failure is recorded as a processing_failure row, so both are always
+"detected".
+
+Choices made when implementing section 3 (DEC-CP-04..07, docs/09 section 16):
+
+- M4, M16, M17 headline = the figure over requests WITHOUT a planted anomaly (a planted label with expected_detection
+  DETECT on the request); the all-requests (business) figure is in the breakdown.
+- M5 population = requests that reached routing (a PENDING_APPROVAL status event, or stored steps) plus requests
+  whose expectation is NO_VALID_APPROVAL_PATH / RULE_CONFLICT. record_expectation.expected_route is also filled for
+  requests stopped before routing (escalated, returned or rejected at validation); those are left out, as section 3
+  says.
+- M9 is not measurable while the S11 / S12 plants are deferred (8B-2); the supplement (ACCEPTED attempts that fail a
+  re-check, must be 0) is still reported.
+- M14 leaves out legacy approvals (no status events by design, DEC-P7B-02) and reports how many; the business-day
+  variant and the split by rounds are not computed (every request has one round).
+- M15 ages are counted at the dataset as-of date; M18 pending steps without an assignment time (later steps of a
+  route) are not aged.

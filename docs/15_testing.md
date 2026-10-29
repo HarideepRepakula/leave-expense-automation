@@ -106,3 +106,14 @@ Real output only. PROGRESS.md and the end-of-phase report quote the actual pytes
     Evaluation with no exception and no error; a wrong password shows INVALID_CREDENTIALS and no session.
 - tests/api/test_api.py: GET /evaluation also returns data_quality and detection; GET /detections adds class and
   severity, returns available=false without the file, and is 403 for a requester.
+
+## Completion-pass tests
+
+- tests/api/test_read_routes.py (lea_test): one test per new read-only route (employees without personal fields
+  unless SYSTEM_ADMIN, policies, own leave balances, own expense lines, own approval queue, audit history,
+  investigation, dashboard metrics equal to direct counts) and one role test (a requester gets 403 on the staff
+  routes).
+- tests/dashboard/test_dashboard.py: the smoke test renders all seven pages; the analytics role reads all ten views;
+  two KPI tests compare the Overview, Reimbursements and Approval operations numbers with plain SQL counts on lea_dev.
+- tests/evaluation/test_metrics.py: evaluator helpers and matching with known answers, planted exclusion, "not
+  measurable" on missing inputs, every metric M1-M18 measured or with its reason on lea_dev.

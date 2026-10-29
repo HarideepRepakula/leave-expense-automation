@@ -20,9 +20,11 @@ import streamlit as st  # noqa: E402
 
 from src.dashboard import client  # noqa: E402
 from src.dashboard.evaluation_view import evaluation  # noqa: E402
+from src.dashboard.pages import analytics, approval_operations, reimbursements  # noqa: E402
 from src.dashboard.views import exceptions, overview, requests  # noqa: E402
 
-VIEWS = {"Overview": overview, "Requests": requests, "Exceptions": exceptions, "Evaluation": evaluation}
+VIEWS = {"Overview": overview, "Analytics": analytics, "Approval operations": approval_operations,
+         "Reimbursements": reimbursements, "Requests": requests, "Exceptions": exceptions, "Evaluation": evaluation}
 DASHBOARD_ROLES = {"APPROVER", "PROCESS_OWNER", "OPS_ANALYST", "SYSTEM_ADMIN"}
 FOOTER = ("Synthetic data only. Policy values are illustrative (ASSUMPTION, illustrative synthetic), not real "
           "company policy. Simulated login, not production authentication.")

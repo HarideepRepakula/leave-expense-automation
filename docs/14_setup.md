@@ -96,7 +96,7 @@ Database tests use TEST_DATABASE_URL (lea_test). They reset that database with d
 ## 8. Start the API and the dashboard (Phase 10)
 
 ```powershell
-alembic upgrade head              # once: migration 0003 adds the analytics views
+alembic upgrade head              # once: migrations 0003 and 0004 add the analytics views
 .\scripts\start_dashboard.ps1     # API in a new window (port 8000), dashboard here (http://localhost:8501)
 ```
 

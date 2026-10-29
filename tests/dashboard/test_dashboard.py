@@ -25,7 +25,10 @@ from tests.db.test_roles_and_migration_cycle import _connect, _role_url
 DASHBOARD = ROOT / "src" / "dashboard"
 APP = DASHBOARD / "app.py"
 FORBIDDEN_IMPORTS = ("src.reference", "src.evaluation", "src.services", "src.repositories", "src.models")
-VIEWS = ("Overview", "Requests", "Exceptions", "Evaluation")
+VIEWS = ("Overview", "Analytics", "Approval operations", "Reimbursements", "Requests", "Exceptions", "Evaluation")
+ANALYTICS_VIEWS = ("v_request", "v_request_exception", "v_reimbursement", "v_employee", "v_request_dimension",
+                   "v_expense_line", "v_approval_step", "v_approval_attempt", "v_reimbursement_attempt",
+                   "v_processing_failure")
 ANALYST = "USR-000010"                             # REQUESTER;OPS_ANALYST in the dev dataset
 
 
@@ -77,7 +80,7 @@ def test_analytics_role_reads_the_views_only(engine, test_url):
     if not url:
         pytest.skip("POSTGRES_ANALYTICS_PASSWORD not set")
     with _connect(url) as conn:
-        for view in ("v_request", "v_request_exception", "v_reimbursement"):
+        for view in ANALYTICS_VIEWS:
             conn.execute(sa.text(f"SELECT count(*) FROM ops.{view}"))
         for stmt in ("SELECT 1 FROM ops.leave_request", "SELECT 1 FROM ops.request_exception",
                      "SELECT 1 FROM ground_truth.anomaly_label",
@@ -94,9 +97,12 @@ def test_app_role_cannot_write_through_the_views(engine, test_url):
     if not url:
         pytest.skip("POSTGRES_APP_PASSWORD not set")
     with _connect(url) as conn:
-        with pytest.raises(DBAPIError) as info:
-            conn.execute(sa.text("UPDATE ops.v_reimbursement SET currency = currency"))
-        assert "permission denied" in str(info.value.orig).lower()
+        for stmt in ("UPDATE ops.v_reimbursement SET currency = currency",
+                     "UPDATE ops.v_processing_failure SET resolution_status = resolution_status"):
+            with pytest.raises(DBAPIError) as info:
+                conn.execute(sa.text(stmt))
+            assert "permission denied" in str(info.value.orig).lower(), stmt
+            conn.rollback()
 
 
 # --- 3. smoke test on lea_dev -----------------------------------------------------------------------------------
@@ -157,7 +163,80 @@ def test_every_view_renders_on_the_dev_dataset(dev_dashboard):
     at.sidebar.radio[0].set_value("Requests").run()
     captions = " ".join(c.value for c in at.caption)
     assert "Source: template" in captions
-    assert {"**Approval steps**", "**Status history**", "**Exception codes**"} <= {m.value for m in at.markdown}
+    # the analyst gets the investigation detail: lines (claims only), applicable policy and audit events
+    assert {"**Approval steps**", "**Status history**", "**Exception codes**", "**Applicable policy**",
+            "**Audit events**"} <= {m.value for m in at.markdown}
+
+
+def _metric(at, label: str) -> str:
+    return next(m.value for m in at.metric if m.label == label)
+
+
+def test_overview_kpis_equal_direct_database_counts(dev_dashboard):
+    """Every Overview number below is recomputed with plain SQL as the migrator (not through the views)."""
+    from src.common.config import get_settings
+
+    at = _logged_in(dev_dashboard)
+    at.sidebar.radio[0].set_value("Overview").run()
+    engine = sa.create_engine(get_settings().database_url, poolclass=sa.pool.NullPool)
+    with engine.connect() as conn:
+        d = conn.execute(sa.text("""
+            WITH req AS (SELECT leave_request_id AS id, workflow_status, exception_class, current_round
+                         FROM ops.leave_request
+                         UNION ALL SELECT expense_claim_id, workflow_status, exception_class, current_round
+                         FROM ops.expense_claim),
+                 hard AS (SELECT DISTINCT coalesce(x.leave_request_id, x.expense_claim_id) AS id
+                          FROM ops.request_exception x JOIN ops.exception_code k USING (exception_code)
+                          JOIN req ON req.id = coalesce(x.leave_request_id, x.expense_claim_id)
+                          WHERE k.severity = 'HARD' AND x.submission_round = req.current_round)
+            SELECT (SELECT count(*) FROM ops.employee) AS employees,
+                   (SELECT count(*) FROM ops.leave_request) AS leave,
+                   (SELECT count(*) FROM ops.expense_claim) AS claims,
+                   (SELECT count(*) FROM ops.reimbursement) AS reimbursements,
+                   count(*) FILTER (WHERE workflow_status = 'PENDING_APPROVAL') AS pending,
+                   count(*) FILTER (WHERE workflow_status = 'ESCALATED_FOR_REVIEW') AS escalated,
+                   count(*) FILTER (WHERE workflow_status = 'RETURNED_FOR_CORRECTION') AS returned,
+                   count(*) FILTER (WHERE workflow_status = 'APPROVED') AS approved,
+                   count(*) FILTER (WHERE workflow_status = 'REJECTED') AS rejected,
+                   count(*) FILTER (WHERE exception_class <> 'NONE') AS with_exception,
+                   count(*) FILTER (WHERE workflow_status = 'ESCALATED_FOR_REVIEW' OR id IN (SELECT id FROM hard))
+                   + (SELECT count(*) FROM ops.processing_failure
+                      WHERE entity_type = 'reimbursement' AND resolution_status = 'OPEN') AS high_priority
+            FROM req""")).mappings().one()
+    engine.dispose()
+    shown = {"Total employees": "employees", "Leave requests": "leave", "Expense claims": "claims",
+             "Reimbursements": "reimbursements", "Pending approval (both)": "pending",
+             "Escalated for review": "escalated", "Returned for correction": "returned", "Approved": "approved",
+             "Rejected": "rejected", "Requests with a policy exception": "with_exception",
+             "High-priority issues": "high_priority"}
+    assert {label: _metric(at, label) for label in shown} == {label: str(d[k]) for label, k in shown.items()}
+    assert any("PENDING_APPROVAL only" in c.value for c in at.caption)
+
+
+def test_reimbursement_and_approval_kpis_equal_direct_database_counts(dev_dashboard):
+    from src.common.config import get_settings
+
+    at = _logged_in(dev_dashboard)
+    engine = sa.create_engine(get_settings().database_url, poolclass=sa.pool.NullPool)
+    with engine.connect() as conn:
+        d = conn.execute(sa.text("""
+            SELECT (SELECT count(*) FROM ops.processing_failure WHERE entity_type = 'reimbursement') AS failures,
+                   (SELECT count(*) FROM ops.reimbursement_attempt WHERE outcome = 'BLOCKED'
+                    AND reason_code = 'DUPLICATE_REIMBURSEMENT') AS duplicates,
+                   (SELECT count(*) FROM ops.reimbursement WHERE reimbursement_status = 'COMPLETED') AS completed,
+                   (SELECT count(*) FROM ops.approval_attempt WHERE outcome = 'BLOCKED') AS blocked,
+                   (SELECT count(*) FROM ops.approval_step s
+                    LEFT JOIN ops.leave_request l ON l.leave_request_id = s.leave_request_id
+                    LEFT JOIN ops.expense_claim c ON c.expense_claim_id = s.expense_claim_id
+                    WHERE s.step_status = 'PENDING' AND s.assigned_at IS NOT NULL
+                    AND s.submission_round = coalesce(l.current_round, c.current_round)) AS queue""")).mappings().one()
+    engine.dispose()
+    at.sidebar.radio[0].set_value("Reimbursements").run()
+    assert (_metric(at, "Failed processing"), _metric(at, "Duplicate reimbursement attempts"),
+            _metric(at, "Completed reimbursements")) == (str(d["failures"]), str(d["duplicates"]), str(d["completed"]))
+    at.sidebar.radio[0].set_value("Approval operations").run()
+    assert (_metric(at, "Pending approval steps"), _metric(at, "Unauthorized approval attempts (blocked)")) == \
+        (str(d["queue"]), str(d["blocked"]))
 
 
 def test_wrong_password_shows_an_error_and_no_session(dev_dashboard):

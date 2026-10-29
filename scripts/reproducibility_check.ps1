@@ -20,7 +20,8 @@ try {
             --expense-claims $ExpenseClaims --out (Join-Path $work $run) | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "generator failed for $run" }
     }
-    & $python -m src.data.compare_runs (Join-Path $work "run_a") (Join-Path $work "run_b")
+    & $python -m src.data.compare_runs (Join-Path $work "run_a") (Join-Path $work "run_b") `
+        --report (Join-Path $root "data\validation\reproducibility.json")
     $code = $LASTEXITCODE
 }
 finally {

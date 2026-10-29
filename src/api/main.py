@@ -13,7 +13,7 @@ import sqlalchemy as sa
 import yaml
 from fastapi import FastAPI
 
-from src.api import evaluation_routes, routes
+from src.api import evaluation_routes, read_routes, routes
 from src.api.core import ApiContext, install_error_handlers
 from src.common.clock import SystemClock
 from src.common.config import Settings, get_settings
@@ -56,5 +56,6 @@ def create_app(ctx: ApiContext | None = None) -> FastAPI:
     app.state.ctx = ctx or build_context()
     install_error_handlers(app)
     app.include_router(routes.router)
+    app.include_router(read_routes.router)
     app.include_router(evaluation_routes.router)
     return app

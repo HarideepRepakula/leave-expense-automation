@@ -26,8 +26,8 @@ REVOKE DELETE ON ops.idempotency_record FROM lea_app;
 GRANT SELECT ON ALL TABLES IN SCHEMA ops TO lea_evaluation;
 GRANT SELECT ON ALL TABLES IN SCHEMA ground_truth TO lea_evaluation;
 
--- Analytics: no table grants. Migration 0003_analytics_views grants SELECT on ops.v_request,
--- ops.v_request_exception and ops.v_reimbursement only.
+-- Analytics: no table grants. Migrations 0003_analytics_views and 0004_analytics_views_2 grant SELECT on their
+-- ops views only (docs/10, "analytics views").
 
 -- Explicitly deny ground_truth to the operational and analytics roles (defence in depth;
 -- they have no USAGE on the schema, so this is belt and braces).

@@ -1,9 +1,10 @@
 """Compare two generator output folders (docs/07 section 10; feeds metric M13).
 
-    python -m src.data.compare_runs <folder A> <folder B>
+    python -m src.data.compare_runs <folder A> <folder B> [--report <file.json>]
 
 Prints row counts side by side and the SHA-256 comparison of every exported file. Only manifest.generated_at
-is ignored (ASM-050). Exit code 0 = reproducible, 1 = differences found.
+is ignored (ASM-050). Exit code 0 = reproducible, 1 = differences found. --report also writes the counts as JSON
+(the reproducibility scripts write data/validation/reproducibility.json, read by src/evaluation for M13).
 """
 from __future__ import annotations
 
@@ -15,7 +16,12 @@ from src.data.export import compare_manifests, dataset_fingerprint, sha256_file
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argv if argv is not None else sys.argv[1:]
+    args = list(argv if argv is not None else sys.argv[1:])
+    report = None
+    if "--report" in args:
+        i = args.index("--report")
+        report = Path(args[i + 1]) if i + 1 < len(args) else None
+        del args[i:i + 2]
     if len(args) != 2:
         print(__doc__)
         return 2
@@ -47,6 +53,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"generated_at (excluded): A={a['generated_at']}  B={b['generated_at']}")
     ok = not diffs and same_files == len(a["files"]) == len(b["files"])
     print("RESULT: REPRODUCIBLE" if ok else "RESULT: DIFFERENT\n" + "\n".join(diffs))
+    if report is not None:
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report.write_text(json.dumps({
+            "files_compared": len(a["files"]), "identical_sha256": same_files, "reproducible": ok,
+            "per_folder": {k: {"files": n, "identical": s} for k, (n, s) in sorted(per_folder.items())},
+            "fingerprint_a": dataset_fingerprint(a), "fingerprint_b": dataset_fingerprint(b), "seed": a.get("seed"),
+            "differences": diffs}, indent=2) + "\n", encoding="utf-8", newline="\n")
     return 0 if ok else 1
 
 

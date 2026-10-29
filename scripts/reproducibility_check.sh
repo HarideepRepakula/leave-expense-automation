@@ -10,4 +10,4 @@ for RUN in run_a run_b; do
   python -m src.data.generate --seed "$SEED" --employees "$EMPLOYEES" --leave-requests "$LEAVE" \
     --expense-claims "$EXPENSE" --out "$WORK/$RUN" > /dev/null
 done
-python -m src.data.compare_runs "$WORK/run_a" "$WORK/run_b"
+python -m src.data.compare_runs "$WORK/run_a" "$WORK/run_b" --report data/validation/reproducibility.json

@@ -4,7 +4,8 @@ A deterministic, rules-driven workflow engine for employee leave requests and ex
 seeded synthetic-data generator, separate ground truth, an evaluation suite, a FastAPI backend and a
 Streamlit dashboard. All data is synthetic. All policy values are illustrative and labelled as assumptions.
 
-Status: Phase 10 (Streamlit dashboard). See PROGRESS.md.
+Status: completion pass after Phase 10 (metrics M1-M18, read-only API routes, more dashboard pages). See
+PROGRESS.md. Evaluation results: `python -m src.evaluation.metrics` (data/validation/evaluation.md).
 
 Start the API and the dashboard: `.\scripts\start_dashboard.ps1` (details in docs/13_dashboard_guide.md).
 

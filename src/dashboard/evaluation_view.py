@@ -13,6 +13,12 @@ def _pct(value) -> str:
     return "n/a" if value is None else f"{value:.2%}"
 
 
+def _value(value, unit: str) -> str:
+    if value is None:
+        return "n/a"
+    return _pct(value) if unit == "ratio" else f"{value} {unit}"
+
+
 def evaluation(token: str, user: dict) -> None:
     st.header("Evaluation")
     try:
@@ -20,6 +26,29 @@ def evaluation(token: str, user: dict) -> None:
     except client.DashboardError as exc:
         st.info(f"Not available for this user (analysts and admins only): {exc}")
         return
+
+    st.subheader("Evaluation metrics (M1-M18)")
+    metrics = ev.get("metrics")
+    if metrics:
+        st.info(metrics["how_to_read"])
+        st.dataframe(pd.DataFrame([{
+            "Metric": m["metric_id"], "Name": m["metric_name"],
+            "Value": m["note"] if m["status"] == "not_measurable" else _value(m["value"], m["unit"]),
+            "Numerator": "" if m["numerator"] is None else str(m["numerator"]),
+            "Denominator": "" if m["denominator"] is None else str(m["denominator"]),
+            "Population": m["population"]} for m in metrics["metrics"]]), hide_index=True, width="stretch")
+        chosen = st.selectbox("Breakdown for", [m["metric_id"] for m in metrics["metrics"]])
+        m = next(x for x in metrics["metrics"] if x["metric_id"] == chosen)
+        if m["note"]:
+            st.caption(m["note"])
+        if m["breakdown"]:
+            st.dataframe(pd.DataFrame([{"Breakdown": b["key"], "Item": str(b["value"]),
+                                        "Numerator": "" if b["numerator"] is None else str(b["numerator"]),
+                                        "Denominator": "" if b["denominator"] is None else str(b["denominator"]),
+                                        "Value": _value(b["result"], b["unit"])} for b in m["breakdown"]]),
+                         hide_index=True, width="stretch")
+        st.caption(f"As-of {metrics['as_of']}. Definitions: docs/08 section 3. Files: python -m "
+                   "src.evaluation.metrics writes data/validation/evaluation.csv, .json and .md.")
 
     st.subheader("Data quality (M1-M3)")
     dq = ev.get("data_quality", {})
@@ -50,7 +79,7 @@ def evaluation(token: str, user: dict) -> None:
                "batch-detector row, a blocked duplicate reimbursement or a reimbursement processing failure. A "
                "positive is a ground-truth label that expects detection. TP = in both, FP = detected only, "
                "FN = expected only; precision = TP / (TP + FP), recall = TP / (TP + FN) (docs/08 section 2). "
-               "A preliminary view of M6-M8; the full evaluation report is Phase 11.")
+               "M6-M8 above use the same matching.")
 
     st.subheader("Services vs reference oracle")
     st.dataframe(pd.DataFrame([{"Comparison": name, **v} for name, v in ev["comparisons"].items()]).fillna(0),

@@ -614,3 +614,15 @@ Read-only views in ops; SELECT for lea_analytics_ro only (lea_app: no rights). N
 - ops.v_request: request_type (LEAVE / EXPENSE), request_id, employee_id, country (claim country; employee country for leave), department_id, workflow_status, exception_class, current_round, first_submitted_at, period_start, period_end, leave_days (leave: requested_quantity), total_amount, approved_amount, currency, total_amount_usd (expense only; NULL for leave), decision_reason_code
 - ops.v_request_exception: exception_id, request_type, request_id, submission_round, exception_code, exception_class, severity (from exception_code), detected_by, detected_at; current round only
 - ops.v_reimbursement: reimbursement_id, expense_claim_id, employee_id, approved_amount, currency, eligibility_status, reimbursement_status, created_at, completed_at
+
+## Completion-pass analytics views (migration 0004_analytics_views_2)
+
+Same rules as 0003: read-only, SELECT for lea_analytics_ro only, no personal data.
+
+- ops.v_employee: employee_id, manager_id, department_id, country, grade, employment_status, default_cost_center_id
+- ops.v_request_dimension: request_type, request_id, leave_type (leave only), cost_center_id (expense only), manager_id (the requester's manager), decided_at (latest status event into the current APPROVED / REJECTED status; NULL otherwise and for legacy approvals)
+- ops.v_expense_line: expense_line_id, expense_claim_id, category, line_amount, currency, cost_center_id (line's, else the claim's), validation_result; current round only
+- ops.v_approval_step: approval_step_id, request_type, request_id, submission_round, sequence_no, required_level, approver_employee_id, step_status, assigned_at, decision_at; current round only
+- ops.v_approval_attempt: attempt_id, request_type, request_id, actor_id, approval_step_id, attempted_action, attempted_at, outcome, reason_code
+- ops.v_reimbursement_attempt: attempt_id, actor_type, expense_claim_id, reimbursement_id, attempted_action, attempted_at, outcome, reason_code
+- ops.v_processing_failure: failure_id, entity_type, entity_id, operation, error_code, occurred_at, resolution_status

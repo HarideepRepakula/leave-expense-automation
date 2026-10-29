@@ -572,7 +572,8 @@ Result at seed 20261022 / 400 (before = commit d9eeca9, after = 8B-1):
 
 8A accepted (d9eeca9); 8B-1 APPROVED (6f1b4e1); AMB-P8-01..05 defaults accepted. 8B-2 DEFERRED to future work:
 plan items 3, 4, 5 of 13.4 (S11 / S12 plants, resubmissions, cancellations never on planted or boundary records),
-S18 SUBMIT idempotency rows (AMB-P8-04) and migration 0003 ground_truth.record_round_expectation (record, round,
+S18 SUBMIT idempotency rows (AMB-P8-04) and migration 0005 (was 0003; renumbered, 15.3 and 16)
+ground_truth.record_round_expectation (record, round,
 expected codes, expected status after validation). Until then the dataset has no resubmission, no cancellation and
 no S11 / S12 / S18 rows (actual counts NULL).
 
@@ -652,3 +653,33 @@ Groq console limits page.
 | AMB-P10-02 | GET /evaluation did not return M1-M3 or detection results. | Extended src/evaluation/summary.py (DEC-P10-04); attempt and failure rows count as detections as docs/08 section 1 says. |
 | AMB-P10-03 | Migration number: 0003 was earmarked for the deferred 8B-2 ground_truth.record_round_expectation (13.4). | 0003 = analytics views; the deferred migration becomes 0004 when 8B-2 is scheduled. |
 | AMB-P10-04 | Suspicious-pattern detections: exception_class SUSPICIOUS_PATTERN only, or every detector row? | SUSPICIOUS_PATTERN only (duplicate receipts, split claims); every code is counted in "By exception code". |
+
+### 15.3 Phase 10 approval (owner 2026-10-29)
+
+APPROVED PHASE 10 (commit 62e065d). AMB-P10-01..04 accepted as applied. Note on AMB-P10-03: the completion pass
+adds migration 0004 (analytics views 2), so the deferred 8B-2 migration (ground_truth.record_round_expectation)
+becomes 0005.
+
+## 16. Completion pass against the spec (after Phase 10)
+
+### 16.1 Decisions and assumptions (ASSUMPTION, illustrative synthetic)
+
+| ID | Decision |
+|---|---|
+| DEC-CP-01 | New read-only API routes (src/api/read_routes.py), JWT + role, limit / offset (max 200; audit history 1000): GET /employees (APPROVER, PROCESS_OWNER, OPS_ANALYST, SYSTEM_ADMIN; organisation fields only, full_name / email / employment dates for SYSTEM_ADMIN only), /leave-policies and /expense-policies (any logged-in user), /leave-balances and /expense-lines (a requester sees only their own; staff roles anyone's; lines without merchant text), /approval-queue (assigned PENDING steps; an approver sees only their own queue, analysts any), /requests/{id}/audit-history and /requests/{id}/investigation (PROCESS_OWNER, OPS_ANALYST, SYSTEM_ADMIN), /dashboard/metrics (staff roles). |
+| DEC-CP-02 | Migration 0004_analytics_views_2: seven more read-only views for lea_analytics_ro (v_employee, v_request_dimension, v_expense_line, v_approval_step, v_approval_attempt, v_reimbursement_attempt, v_processing_failure); no names, e-mail, merchant text or error messages; lea_app gets nothing. The deferred 8B-2 migration becomes 0005. |
+| DEC-CP-03 | "High-priority issues" = distinct requests ESCALATED_FOR_REVIEW or with a HARD exception code in their current round, plus OPEN reimbursement processing_failure rows. Same definition in the dashboard Overview and GET /dashboard/metrics. Dev dataset: 43 requests + 37 failures = 80. |
+| DEC-CP-04 | M4, M16, M17 lead with the figure over requests without a planted anomaly (spec 17); the all-requests figure is in the breakdown (docs/08 section 7). |
+| DEC-CP-05 | M5 population: requests that reached routing plus expected routing exceptions; the expected route of requests stopped before routing is not compared (docs/08 section 7). |
+| DEC-CP-06 | M13 reads data/validation/reproducibility.json, written by compare_runs --report (both reproducibility scripts pass it). |
+| DEC-CP-07 | Dashboard ages (approval aging, queue) are counted at the dataset as-of date (config/generation.yaml), not today: the synthetic data end there. |
+| DEC-CP-08 | The request detail uses GET /requests/{id}/investigation for analysts (adds lines, applicable policy, approval attempts, reimbursements, audit events); approvers keep the plain detail. |
+
+### 16.2 Ambiguities found (default APPLIED; please confirm or change)
+
+| ID | Question | Default applied |
+|---|---|---|
+| AMB-CP-01 | M5 on the dev dataset: one disagreement, EXP-2025-000483. Ground truth keeps the route at assignment (L2 = EMP-000190); the stored step shows the documented reassignment to EMP-000126 (AMB-P7B-11). Which is the "expected route"? | Reported as measured: 917 / 918 expense, 1664 / 1665 overall (99.94%); level-only 100%. Not adjusted. Option: let the expectation follow reassignments (a ground-truth change, 8B-2 style). |
+| AMB-CP-02 | Leave utilisation (spec 20) needs entitlement from the balance ledger, which no analytics view exposes. | Not shown; "days approved" shown instead. Option: a v_leave_balance view in a later migration. |
+| AMB-CP-03 | High-priority issues counts HARD-exception requests that are already REJECTED (closed). | Counted, as the instruction suggested; can be limited to open requests. |
+| AMB-CP-04 | Filters: the Requests page keeps its own filters (type, status, exception class, country, id); the full spec-20 filter set is on Analytics and Approval operations. | Applied. |

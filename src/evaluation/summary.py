@@ -97,7 +97,10 @@ def detection_results(evaluation_engine: sa.Engine, validation_dir: Path) -> dic
 
 
 def summarize(evaluation_engine: sa.Engine, validation_dir: Path) -> dict:
+    from src.evaluation.metrics import compute       # metrics.py imports this module's queries
+
     return {"comparisons": comparison_counts(validation_dir),
             "status_at_asof_vs_expected": status_vs_expected(evaluation_engine),
             "data_quality": data_quality(validation_dir),
-            "detection": detection_results(evaluation_engine, validation_dir)}
+            "detection": detection_results(evaluation_engine, validation_dir),
+            "metrics": compute(evaluation_engine, validation_dir)}
